@@ -37,7 +37,7 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
     { id: null, icon: BarChart2, label: 'Analytics (bientôt)', section: 'Outils' },
   ]
 
-  const sections = [...new Set(navItems.map(i => i.section))]
+const sections = Array.from(new Set(navItems.map(i => i.section)))
 
   return (
     <aside className="w-[220px] min-w-[220px] flex flex-col h-screen border-r" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--bg-border)' }}>

@@ -2,11 +2,6 @@ import NextAuth from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
 import { createClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
-
 const handler = NextAuth({
   providers: [
     GoogleProvider({
@@ -31,14 +26,21 @@ const handler = NextAuth({
         token.accessToken = account.access_token
         token.refreshToken = account.refresh_token
         token.accessTokenExpires = account.expires_at
-        // Store encrypted tokens in Supabase
-        await supabase.from('oauth_tokens').upsert({
-          user_id: token.sub,
-          access_token: account.access_token,
-          refresh_token: account.refresh_token,
-          expires_at: account.expires_at,
-          updated_at: new Date().toISOString(),
-        })
+        try {
+          const supabase = createClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          )
+          await supabase.from('oauth_tokens').upsert({
+            user_id: token.sub,
+            access_token: account.access_token,
+            refresh_token: account.refresh_token,
+            expires_at: account.expires_at,
+            updated_at: new Date().toISOString(),
+          })
+        } catch (e) {
+          console.error('Failed to store token:', e)
+        }
       }
       return token
     },
@@ -47,7 +49,6 @@ const handler = NextAuth({
       return session
     },
   },
-  pages: { signIn: '/auth/signin' },
   secret: process.env.NEXTAUTH_SECRET,
 })
 

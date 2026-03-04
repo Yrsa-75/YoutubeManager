@@ -22,12 +22,13 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-        type, videoTitle: video.title,
-        videoDescription: video.description,
-        keywords: (video.tags || []).join(', '),
-        hint: aiHint,
-        count: 5,
-      }),
+          type,
+          videoTitle: video.title,
+          videoDescription: video.description,
+          keywords: (video.tags || []).join(', '),
+          hint: aiHint,
+          count: 5,
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
@@ -61,7 +62,7 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
       </div>
 
       {video.thumbnail_url && (
-        <img src={video.thumbnail_url} alt={video.title} className="w-full" style={{ aspectRatio: '16/9', objectFit: 'cover' }} />
+        <img src={video.thumbnail_url} alt={video.title} referrerPolicy="no-referrer" className="w-full" style={{ aspectRatio: '16/9', objectFit: 'cover' }} />
       )}
 
       <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--bg-border)' }}>
@@ -82,30 +83,44 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
       </div>
 
       <div className="px-4 py-3">
-        <div className="text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color: '#a855f7' }}>
+        <div className="text-[10px] font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5" style={{ color: '#a855f7' }}>
           <Sparkles size={11} /> Génération IA
         </div>
+
         <div className="flex flex-col gap-2">
-          {(['titles', 'description'] as const).map(type => (
-            <button onClick={() => generate('titles')} disabled={!!loading}
-              className="w-full py-2 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
-              style={{ background: 'rgba(168,85,247,0.1)', borderColor: 'rgba(168,85,247,0.25)', color: '#a855f7' }}>
-              {loading === 'titles' ? <><RotateCcw size={11} className="animate-spin" /> Génération...</> : <><Sparkles size={11} /> Générer 5 titres</>}
-            </button>
-            <textarea
-              value={aiHint}
-              onChange={e => setAiHint(e.target.value)}
-              placeholder="Donner des indications pour la description..."
-              rows={2}
-              className="w-full rounded-lg border px-3 py-2 text-xs resize-none outline-none"
-              style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-primary)', fontFamily: 'inherit' }}
-            />
-            <button onClick={() => generate('description')} disabled={!!loading}
-              className="w-full py-2 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
-              style={{ background: 'rgba(168,85,247,0.1)', borderColor: 'rgba(168,85,247,0.25)', color: '#a855f7' }}>
-              {loading === 'description' ? <><RotateCcw size={11} className="animate-spin" /> Génération...</> : <><Sparkles size={11} /> Générer une description</>}
-            </button>
-          ))}
+
+          {/* Bouton titres */}
+          <button
+            onClick={() => generate('titles')}
+            disabled={!!loading}
+            className="w-full py-2 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
+            style={{ background: 'rgba(168,85,247,0.1)', borderColor: 'rgba(168,85,247,0.25)', color: '#a855f7' }}>
+            {loading === 'titles'
+              ? <><RotateCcw size={11} className="animate-spin" /> Génération...</>
+              : <><Sparkles size={11} /> Générer 5 titres</>}
+          </button>
+
+          {/* Indication pour la description */}
+          <textarea
+            value={aiHint}
+            onChange={e => setAiHint(e.target.value)}
+            placeholder="Donner des indications pour la description..."
+            rows={2}
+            className="w-full rounded-lg border px-3 py-2 text-xs resize-none outline-none"
+            style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-primary)', fontFamily: 'inherit' }}
+          />
+
+          {/* Bouton description */}
+          <button
+            onClick={() => generate('description')}
+            disabled={!!loading}
+            className="w-full py-2 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
+            style={{ background: 'rgba(168,85,247,0.1)', borderColor: 'rgba(168,85,247,0.25)', color: '#a855f7' }}>
+            {loading === 'description'
+              ? <><RotateCcw size={11} className="animate-spin" /> Génération...</>
+              : <><Sparkles size={11} /> Générer une description</>}
+          </button>
+
         </div>
 
         {aiResult && (

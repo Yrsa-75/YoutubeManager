@@ -100,16 +100,6 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
               : <><Sparkles size={11} /> Générer 5 titres</>}
           </button>
 
-          {/* Indication pour la description */}
-          <textarea
-            value={aiHint}
-            onChange={e => setAiHint(e.target.value)}
-            placeholder="Donner des indications pour la description..."
-            rows={2}
-            className="w-full rounded-lg border px-3 py-2 text-xs resize-none outline-none"
-            style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-primary)', fontFamily: 'inherit' }}
-          />
-
           {/* Bouton description */}
           <button
             onClick={() => generate('description')}
@@ -121,6 +111,17 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
               : <><Sparkles size={11} /> Générer une description</>}
           </button>
 
+          {/* Indication pour la description */}
+          <textarea
+            value={aiHint}
+            onChange={e => setAiHint(e.target.value)}
+            placeholder="Donner des indications pour la description..."
+            rows={2}
+            className="w-full rounded-lg border px-3 py-2 text-xs resize-none outline-none"
+            style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-primary)', fontFamily: 'inherit' }}
+          />
+
+          
         </div>
 
         {aiResult && (

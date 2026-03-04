@@ -20,7 +20,6 @@ export default function TopBar({ activeTab, searchQuery, setSearchQuery }: Props
       <h1 className="text-sm font-semibold tracking-tight" style={{ color: 'var(--text-primary)' }}>
         {TAB_TITLES[activeTab]}
       </h1>
-      <div className="flex-1" />
       {(activeTab === 'uploaded' || activeTab === 'pending') && (
         <>
           <div className="flex items-center gap-2 h-8 px-3 rounded-lg border w-64" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)' }}>
@@ -36,6 +35,7 @@ export default function TopBar({ activeTab, searchQuery, setSearchQuery }: Props
           </div>
         </>
       )}
+      <div className="flex-1" />
     </header>
   )
 }

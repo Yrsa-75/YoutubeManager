@@ -1,11 +1,12 @@
 'use client'
 import { useEffect, useState, useMemo } from 'react'
-import { ChevronUp, ChevronDown, Sparkles, ExternalLink, Settings2 } from 'lucide-react'
+import { ChevronUp, ChevronDown, Sparkles, ExternalLink, Settings2, Download } from 'lucide-react'
 import type { Video, ColorRule } from '@/types'
 import { formatNumber, formatDate, formatDuration } from '@/lib/utils/format'
 import { applyColorRules } from '@/lib/utils/colorRules'
 import VideoDetailPanel from './VideoDetailPanel'
 import ColumnManager from './ColumnManager'
+import toast from 'react-hot-toast'
 
 interface Props { searchQuery: string }
 
@@ -50,6 +51,7 @@ export default function VideoTable({ searchQuery }: Props) {
   const [colorRules, setColorRules] = useState<ColorRule[]>([])
   const [columns, setColumns] = useState(DEFAULT_COLUMNS)
   const [showColumnManager, setShowColumnManager] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     fetchVideos()
@@ -85,6 +87,45 @@ export default function VideoTable({ searchQuery }: Props) {
       const data = await res.json()
       setColorRules(data.rules || [])
     } catch (e) { console.error(e) }
+  }
+
+  async function handleExport() {
+    setExporting(true)
+    try {
+      const XLSX = await import('xlsx')
+      const exportData = filteredVideos.map(v => ({
+        'ID YouTube': v.youtube_id,
+        'Titre': v.title,
+        'Statut': v.status,
+        'Date upload': v.published_at ? new Date(v.published_at).toLocaleDateString('fr-FR') : '',
+        'Vues': v.view_count,
+        'Likes': v.like_count,
+        'Commentaires': v.comment_count,
+        'Durée': formatDuration(v.duration),
+        'Tags': (v.tags || []).join(', '),
+        'Description': v.description || '',
+        'URL': 'https://youtube.com/watch?v=' + v.youtube_id,
+        'Catégorie couleur': v._color ? (colorRules.find(r => r.color === v._color)?.name || v._color) : '',
+      }))
+
+      const ws = XLSX.utils.json_to_sheet(exportData)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Vidéos')
+
+      const cols = Object.keys(exportData[0] || {}).map(key => ({
+        wch: Math.max(key.length, ...exportData.slice(0, 50).map(r => String((r as any)[key] || '').length))
+      }))
+      ws['!cols'] = cols
+
+      const date = new Date().toISOString().split('T')[0]
+      XLSX.writeFile(wb, 'YoutubeManager-export-' + date + '.xlsx')
+      toast.success(filteredVideos.length + ' vidéos exportées !')
+    } catch (e) {
+      toast.error('Erreur export')
+      console.error(e)
+    } finally {
+      setExporting(false)
+    }
   }
 
   const videosWithColors = useMemo<VideoWithColor[]>(() =>
@@ -165,11 +206,26 @@ export default function VideoTable({ searchQuery }: Props) {
             {rule.name}
           </button>
         ))}
-        <button onClick={() => setShowColumnManager(true)}
-          className="ml-auto h-7 px-3 rounded-md text-xs border flex items-center gap-1.5 transition-all"
-          style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-muted)' }}>
-          <Settings2 size={11} /> Colonnes
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={handleExport}
+            disabled={exporting || filteredVideos.length === 0}
+            className="h-7 px-3 rounded-md text-xs font-medium border flex items-center gap-1.5 transition-all"
+            style={{
+              background: 'var(--bg-card)',
+              borderColor: 'var(--bg-border)',
+              color: exporting ? 'var(--text-muted)' : '#22c55e',
+              opacity: filteredVideos.length === 0 ? 0.4 : 1
+            }}>
+            <Download size={11} />
+            {exporting ? 'Export...' : 'Exporter XLSX'}
+          </button>
+          <button onClick={() => setShowColumnManager(true)}
+            className="h-7 px-3 rounded-md text-xs border flex items-center gap-1.5 transition-all"
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-muted)' }}>
+            <Settings2 size={11} /> Colonnes
+          </button>
+        </div>
       </div>
 
       {/* Table + Panel */}

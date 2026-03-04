@@ -203,15 +203,12 @@ export default function VideoTable({ searchQuery }: Props) {
                   const color = (video as any)._color
                   const isSelected = selectedVideo?.youtube_id === video.youtube_id
                   return (
-                    <tr key={video.youtube_id}
-                      onClick={() => setSelectedVideo(isSelected ? null : video)}
-                      className="group cursor-pointer transition-colors"
-                      style={{
-                        background: isSelected ? 'var(--bg-hover)' : color ? COLOR_STYLES[color] || 'transparent' : 'transparent',
-                        borderLeft: color ? `2px solid ${color}` : '2px solid transparent',
-                      }}>
-                      {activeColumns.map(col => (
-                        <td key={col.key} className="px-3 py-2 border-b" style={{ borderColor: 'rgba(34,34,46,0.5)', maxWidth: col.width || 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: col.key === 'title' ? 'nowrap' : 'nowrap' }}>
+                  <tr key={video.youtube_id}
+                    onClick={() => setSelectedVideo(isSelected ? null : video)}
+                    className="group cursor-pointer transition-colors"
+                    style={{ background: isSelected ? 'var(--bg-hover)' : colorBg }}>
+                    {activeColumns.map((col, colIndex) => (
+                      <td key={col.key} className="px-3 py-2 border-b" style={{borderColor: 'rgba(34,34,46,0.5)',borderLeft: colIndex === 0 && video._color ? ('3px solid ' + video._color) : undefined,maxWidth: col.width || 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
                           {renderCell(video, col.key)}
                         </td>
                       ))}

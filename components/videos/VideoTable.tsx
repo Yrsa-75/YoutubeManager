@@ -15,12 +15,12 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   unlisted: { label: 'Non répertorié', color: '#f97316' },
 }
 
-const COLOR_STYLES: Record<string, string> = {
-  '#ef4444': 'rgba(239,68,68,0.05)',
-  '#f97316': 'rgba(249,115,22,0.05)',
-  '#22c55e': 'rgba(34,197,94,0.04)',
-  '#3b82f6': 'rgba(59,130,246,0.04)',
-  '#a855f7': 'rgba(168,85,247,0.04)',
+const COLOR_BG: Record<string, string> = {
+  '#ef4444': 'rgba(239,68,68,0.06)',
+  '#f97316': 'rgba(249,115,22,0.06)',
+  '#22c55e': 'rgba(34,197,94,0.05)',
+  '#3b82f6': 'rgba(59,130,246,0.05)',
+  '#a855f7': 'rgba(168,85,247,0.05)',
 }
 
 const DEFAULT_COLUMNS = [
@@ -35,6 +35,8 @@ const DEFAULT_COLUMNS = [
   { key: 'duration', label: 'Durée', enabled: true },
   { key: 'tags', label: 'Tags', enabled: false },
 ]
+
+type VideoWithColor = Video & { _color: string }
 
 export default function VideoTable({ searchQuery }: Props) {
   const [videos, setVideos] = useState<Video[]>([])
@@ -53,12 +55,13 @@ export default function VideoTable({ searchQuery }: Props) {
     fetchVideos()
     fetchColorRules()
   }, [searchQuery, sortBy, sortDir, statusFilter])
-  
+
   useEffect(() => {
     const handler = () => fetchVideos()
     window.addEventListener('youtube-sync-done', handler)
     return () => window.removeEventListener('youtube-sync-done', handler)
   }, [])
+
   async function fetchVideos() {
     setLoading(true)
     try {
@@ -84,14 +87,14 @@ export default function VideoTable({ searchQuery }: Props) {
     } catch (e) { console.error(e) }
   }
 
-  const videosWithColors = useMemo(() =>
+  const videosWithColors = useMemo<VideoWithColor[]>(() =>
     videos.map(v => ({ ...v, _color: applyColorRules(v, colorRules) })),
     [videos, colorRules]
   )
 
   const filteredVideos = useMemo(() => {
     if (!colorFilter) return videosWithColors
-    return videosWithColors.filter(v => (v as any)._color === colorFilter)
+    return videosWithColors.filter(v => v._color === colorFilter)
   }, [videosWithColors, colorFilter])
 
   function handleSort(col: string) {
@@ -100,12 +103,13 @@ export default function VideoTable({ searchQuery }: Props) {
   }
 
   const activeColumns = columns.filter(c => c.enabled)
+  const colorRuleFilters = colorRules.filter(r => r.enabled).slice(0, 4)
 
-  function renderCell(video: any, colKey: string) {
+  function renderCell(video: VideoWithColor, colKey: string) {
     switch (colKey) {
       case 'thumbnail_url':
         return video.thumbnail_url
-          ? <img src={video.thumbnail_url} alt="" className="rounded" style={{ width: 48, height: 28, objectFit: 'cover' }} />
+          ? <img src={video.thumbnail_url} alt="" className="rounded" referrerPolicy="no-referrer" style={{ width: 48, height: 28, objectFit: 'cover' }} />
           : <div className="rounded flex items-center justify-center text-xs" style={{ width: 48, height: 28, background: 'var(--bg-hover)', color: 'var(--text-muted)' }}>YT</div>
       case 'youtube_id':
         return <span className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>{video.youtube_id}</span>
@@ -128,18 +132,16 @@ export default function VideoTable({ searchQuery }: Props) {
       case 'tags':
         return <span className="text-[11px] truncate block max-w-[120px]" style={{ color: 'var(--text-muted)' }}>{(video.tags || []).slice(0, 3).join(', ')}</span>
       default:
-        return String(video[colKey] ?? '—')
+        return <span>{String((video as Record<string, unknown>)[colKey] ?? '')}</span>
     }
   }
-
-  const colorRuleFilters = colorRules.filter(r => r.enabled).slice(0, 4)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Filters */}
       <div className="flex items-center gap-2 px-5 py-2.5 border-b flex-wrap shrink-0" style={{ borderColor: 'var(--bg-border)', background: 'var(--bg-primary)' }}>
         <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Filtres :</span>
-        {['', 'public', 'private', 'unlisted'].map(s => (
+        {(['', 'public', 'private', 'unlisted'] as const).map(s => (
           <button key={s || 'all'} onClick={() => setStatusFilter(s)}
             className="h-7 px-3 rounded-md text-xs font-medium border transition-all"
             style={{
@@ -163,7 +165,9 @@ export default function VideoTable({ searchQuery }: Props) {
             {rule.name}
           </button>
         ))}
-        <button onClick={() => setShowColumnManager(true)} className="ml-auto h-7 px-3 rounded-md text-xs border flex items-center gap-1.5 transition-all" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-muted)' }}>
+        <button onClick={() => setShowColumnManager(true)}
+          className="ml-auto h-7 px-3 rounded-md text-xs border flex items-center gap-1.5 transition-all"
+          style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-muted)' }}>
           <Settings2 size={11} /> Colonnes
         </button>
       </div>
@@ -176,11 +180,12 @@ export default function VideoTable({ searchQuery }: Props) {
               <div className="text-sm">Chargement des vidéos...</div>
             </div>
           ) : (
-            <table className="w-full text-xs" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
+            <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
               <thead className="sticky top-0 z-10" style={{ background: 'var(--bg-primary)' }}>
                 <tr>
                   {activeColumns.map(col => (
-                    <th key={col.key} onClick={() => !['thumbnail_url', 'tags'].includes(col.key) && handleSort(col.key)}
+                    <th key={col.key}
+                      onClick={() => !['thumbnail_url', 'tags'].includes(col.key) && handleSort(col.key)}
                       className="px-3 py-2.5 text-left font-semibold uppercase tracking-wider border-b select-none"
                       style={{ color: sortBy === col.key ? 'var(--accent-red)' : 'var(--text-muted)', borderColor: 'var(--bg-border)', fontSize: '10px', cursor: ['thumbnail_url', 'tags'].includes(col.key) ? 'default' : 'pointer', whiteSpace: 'nowrap', width: col.width }}>
                       <span className="flex items-center gap-1">
@@ -196,31 +201,43 @@ export default function VideoTable({ searchQuery }: Props) {
               </thead>
               <tbody>
                 {filteredVideos.length === 0 ? (
-                  <tr><td colSpan={activeColumns.length + 1} className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
-                    {searchQuery ? 'Aucune vidéo ne correspond à votre recherche' : 'Aucune vidéo — cliquez sur "Synchroniser YouTube" pour commencer'}
-                  </td></tr>
+                  <tr>
+                    <td colSpan={activeColumns.length + 1} className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
+                      {searchQuery ? 'Aucune vidéo ne correspond à votre recherche' : 'Aucune vidéo — cliquez sur "Synchroniser YouTube" pour commencer'}
+                    </td>
+                  </tr>
                 ) : filteredVideos.map(video => {
-                  const color = (video as any)._color
                   const isSelected = selectedVideo?.youtube_id === video.youtube_id
+                  const colorBg = video._color ? (COLOR_BG[video._color] || 'transparent') : 'transparent'
                   return (
-                  <tr key={video.youtube_id}
-                    onClick={() => setSelectedVideo(isSelected ? null : video)}
-                    className="group cursor-pointer transition-colors"
-                    style={{ background: isSelected ? 'var(--bg-hover)' : colorBg }}>
-                    {activeColumns.map((col, colIndex) => (
-                      <td key={col.key} className="px-3 py-2 border-b" style={{borderColor: 'rgba(34,34,46,0.5)',borderLeft: colIndex === 0 && video._color ? ('3px solid ' + video._color) : undefined,maxWidth: col.width || 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                    <tr key={video.youtube_id}
+                      onClick={() => setSelectedVideo(isSelected ? null : video)}
+                      className="group cursor-pointer transition-colors"
+                      style={{ background: isSelected ? 'var(--bg-hover)' : colorBg }}>
+                      {activeColumns.map((col, colIndex) => (
+                        <td key={col.key}
+                          className="px-3 py-2 border-b"
+                          style={{
+                            borderColor: 'rgba(34,34,46,0.5)',
+                            borderLeft: colIndex === 0 && video._color ? `3px solid ${video._color}` : colIndex === 0 ? '3px solid transparent' : undefined,
+                            maxWidth: col.width || 200,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
                           {renderCell(video, col.key)}
                         </td>
                       ))}
                       <td className="px-3 py-2 border-b" style={{ borderColor: 'rgba(34,34,46,0.5)' }}>
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button onClick={e => { e.stopPropagation(); setSelectedVideo(video) }}
-                            className="w-6 h-6 rounded flex items-center justify-center border transition-all hover:text-purple-400"
+                            className="w-6 h-6 rounded flex items-center justify-center border transition-all"
                             style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-muted)' }}
                             title="Générer avec IA">
                             <Sparkles size={10} />
                           </button>
-                          <a href={`https://youtube.com/watch?v=${video.youtube_id}`} target="_blank" rel="noreferrer"
+                          <a href={`https://youtube.com/watch?v=${video.youtube_id}`}
+                            target="_blank" rel="noreferrer"
                             onClick={e => e.stopPropagation()}
                             className="w-6 h-6 rounded flex items-center justify-center border transition-all"
                             style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-muted)' }}
@@ -238,10 +255,7 @@ export default function VideoTable({ searchQuery }: Props) {
         </div>
 
         {selectedVideo && (
-          <VideoDetailPanel
-            video={selectedVideo}
-            onClose={() => setSelectedVideo(null)}
-          />
+          <VideoDetailPanel video={selectedVideo} onClose={() => setSelectedVideo(null)} />
         )}
       </div>
 

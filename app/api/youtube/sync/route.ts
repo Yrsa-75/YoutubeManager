@@ -1,32 +1,18 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+import { authOptions } from '@/lib/auth/options'
 
 export async function POST() {
   try {
-    const session = await getServerSession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-    // Get stored token
-    const { data: tokenData } = await supabase
-      .from('oauth_tokens')
-      .select('access_token')
-      .single()
-
-    if (!tokenData?.access_token) {
+    const session = await getServerSession(authOptions)
+    if (!session?.accessToken) {
       return NextResponse.json({ error: 'No access token' }, { status: 401 })
     }
 
-    const token = tokenData.access_token
+    const token = session.accessToken
     let allVideos: any[] = []
     let pageToken: string | undefined
 
-    // Fetch all video IDs from the channel (paginated)
     do {
       const url = new URL('https://www.googleapis.com/youtube/v3/search')
       url.searchParams.set('part', 'id')
@@ -42,13 +28,12 @@ export async function POST() {
       if (!res.ok) throw new Error(data.error?.message || 'YouTube API error')
 
       const ids = data.items?.map((item: any) => item.id.videoId) || []
-      
-      // Fetch video details in batches of 50
+
       if (ids.length > 0) {
         const detailsUrl = new URL('https://www.googleapis.com/youtube/v3/videos')
         detailsUrl.searchParams.set('part', 'snippet,statistics,contentDetails,status')
         detailsUrl.searchParams.set('id', ids.join(','))
-        
+
         const detailsRes = await fetch(detailsUrl.toString(), {
           headers: { Authorization: `Bearer ${token}` }
         })
@@ -57,9 +42,14 @@ export async function POST() {
       }
 
       pageToken = data.nextPageToken
-    } while (pageToken && allVideos.length < 500) // Safety limit for initial sync
+    } while (pageToken && allVideos.length < 500)
 
-    // Upsert videos to Supabase
+    const { createClient } = await import('@supabase/supabase-js')
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    )
+
     const videosToInsert = allVideos.map((video: any) => ({
       youtube_id: video.id,
       title: video.snippet?.title,
@@ -83,15 +73,8 @@ export async function POST() {
       if (error) throw error
     }
 
-    // Update sync log
-    await supabase.from('sync_logs').insert({
-      videos_synced: videosToInsert.length,
-      status: 'success',
-      synced_at: new Date().toISOString(),
-    })
-
-    return NextResponse.json({ 
-      success: true, 
+    return NextResponse.json({
+      success: true,
       synced: videosToInsert.length,
       message: `${videosToInsert.length} vidéos synchronisées`
     })

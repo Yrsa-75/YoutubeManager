@@ -34,10 +34,6 @@ export default function TopBar({ activeTab, searchQuery, setSearchQuery }: Props
               style={{ color: 'var(--text-primary)', fontFamily: 'inherit' }}
             />
           </div>
-          <button className="h-8 px-3 rounded-lg border text-xs flex items-center gap-1.5 transition-all" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)' }}>
-            <Download size={12} />
-            Exporter
-          </button>
         </>
       )}
     </header>

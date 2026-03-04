@@ -53,7 +53,12 @@ export default function VideoTable({ searchQuery }: Props) {
     fetchVideos()
     fetchColorRules()
   }, [searchQuery, sortBy, sortDir, statusFilter])
-
+  
+  useEffect(() => {
+    const handler = () => fetchVideos()
+    window.addEventListener('youtube-sync-done', handler)
+    return () => window.removeEventListener('youtube-sync-done', handler)
+  }, [])
   async function fetchVideos() {
     setLoading(true)
     try {

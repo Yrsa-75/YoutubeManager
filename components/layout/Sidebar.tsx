@@ -22,7 +22,8 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       toast.success(`${data.synced} vidéos synchronisées`)
-      setLastSync('à l\'instant')
+      setLastSync('a l instant')
+      window.dispatchEvent(new CustomEvent('youtube-sync-done'))
     } catch (e: any) {
       toast.error('Erreur sync : ' + e.message)
     } finally {

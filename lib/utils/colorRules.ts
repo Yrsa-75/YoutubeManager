@@ -3,8 +3,8 @@ import { differenceInDays, parseISO } from 'date-fns'
 
 export function applyColorRules(video: Video, rules: ColorRule[]): string {
   const enabledRules = rules
-    .filter(r => r.enabled)
-    .sort((a, b) => a.priority - b.priority)
+    .filter((r: ColorRule) => r.enabled)
+    .sort((a: ColorRule, b: ColorRule) => a.priority - b.priority)
 
   for (const rule of enabledRules) {
     if (matchesRule(video, rule)) return rule.color
@@ -13,32 +13,36 @@ export function applyColorRules(video: Video, rules: ColorRule[]): string {
 }
 
 function matchesRule(video: Video, rule: ColorRule): boolean {
-  const results = rule.conditions.map(cond => matchesCondition(video, cond))
+  const results = rule.conditions.map((cond: any) => matchesCondition(video, cond))
   return rule.logic === 'AND' ? results.every(Boolean) : results.some(Boolean)
 }
 
-function matchesCondition(video: Video, cond: ColorCondition): boolean {
-  let fieldValue: any
+function matchesCondition(video: Video, cond: any): boolean {
+  let fieldValue: number | string = 0
 
   switch (cond.field) {
     case 'view_count': fieldValue = video.view_count; break
     case 'like_count': fieldValue = video.like_count; break
     case 'comment_count': fieldValue = video.comment_count; break
     case 'days_since_upload':
-      fieldValue = differenceInDays(new Date(), parseISO(video.published_at))
+      try { fieldValue = differenceInDays(new Date(), parseISO(video.published_at)) }
+      catch { fieldValue = 0 }
       break
     case 'status': fieldValue = video.status; break
     default: return false
   }
 
+  // Support both "operator" and "op" field names
+  const operator = cond.operator || cond.op
   const val = Number(cond.value)
-  switch (cond.operator) {
-    case 'gt': return fieldValue > val
-    case 'lt': return fieldValue < val
-    case 'gte': return fieldValue >= val
-    case 'lte': return fieldValue <= val
+
+  switch (operator) {
+    case 'gt': return Number(fieldValue) > val
+    case 'lt': return Number(fieldValue) < val
+    case 'gte': return Number(fieldValue) >= val
+    case 'lte': return Number(fieldValue) <= val
     case 'eq': return fieldValue === cond.value
-    case 'days_since': return fieldValue >= val
+    case 'days_since': return Number(fieldValue) >= val
     default: return false
   }
 }

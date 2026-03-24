@@ -16,7 +16,6 @@ export async function POST() {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
-    // Get all youtube_ids from Supabase
     const { data: videos, error: fetchError } = await supabase
       .from('videos')
       .select('youtube_id, published_at')
@@ -27,7 +26,7 @@ export async function POST() {
       return NextResponse.json({
         success: true,
         updated: 0,
-        message: 'Aucune vid\u00e9o \u00e0 synchroniser. Lance d\'abord la sync YouTube.',
+        message: 'Aucune vidéo à synchroniser. Lance d\'abord la sync YouTube.',
       })
     }
 
@@ -36,8 +35,6 @@ export async function POST() {
       : '2005-01-01'
     const today = new Date().toISOString().split('T')[0]
 
-    // YouTube Analytics API: video dimension requires sort parameter
-    // Note: impressions and CTR are not available via public Analytics API
     const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
     url.searchParams.set('ids', 'channel==MINE')
     url.searchParams.set('startDate', oldestDate)
@@ -48,7 +45,7 @@ export async function POST() {
     url.searchParams.set('sort', '-estimatedMinutesWatched')
 
     const res = await fetch(url.toString(), {
-      headers: { Authorization: \`Bearer \${token}\` },
+      headers: { Authorization: `Bearer ${token}` },
     })
     const data = await res.json()
 
@@ -89,7 +86,7 @@ export async function POST() {
       success: true,
       updated: totalUpdated,
       total: videos.length,
-      message: \`Analytics synchronis\u00e9es pour \${totalUpdated} vid\u00e9os sur \${videos.length}\`,
+      message: `Analytics synchronisées pour ${totalUpdated} vidéos sur ${videos.length}`,
     })
   } catch (error: any) {
     console.error('Analytics sync error:', error)

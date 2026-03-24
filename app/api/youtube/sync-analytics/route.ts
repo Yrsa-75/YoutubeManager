@@ -3,8 +3,6 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/options'
 import { createClient } from '@supabase/supabase-js'
 
-const BATCH_SIZE = 200
-
 export async function POST() {
   try {
     const session = await getServerSession(authOptions)
@@ -33,77 +31,65 @@ export async function POST() {
       })
     }
 
-    const allIds = videos.map((v) => v.youtube_id)
-    let totalUpdated = 0
-
     const oldestDate = videos[0]?.published_at
       ? new Date(videos[0].published_at).toISOString().split('T')[0]
       : '2005-01-01'
     const today = new Date().toISOString().split('T')[0]
 
-    // Process in batches of 200
-    for (let i = 0; i < allIds.length; i += BATCH_SIZE) {
-      const batch = allIds.slice(i, i + BATCH_SIZE)
-      const filterValue = batch.join(',')
+    // YouTube Analytics API: video dimension requires sort parameter
+    // Note: impressions and CTR are not available via public Analytics API
+    const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
+    url.searchParams.set('ids', 'channel==MINE')
+    url.searchParams.set('startDate', oldestDate)
+    url.searchParams.set('endDate', today)
+    url.searchParams.set('dimensions', 'video')
+    url.searchParams.set('metrics', 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares')
+    url.searchParams.set('maxResults', '500')
+    url.searchParams.set('sort', '-estimatedMinutesWatched')
 
-      const url = new URL(
-        'https://youtubeanalytics.googleapis.com/v2/reports'
-      )
-      url.searchParams.set('ids', 'channel==MINE')
-      url.searchParams.set('startDate', oldestDate)
-      url.searchParams.set('endDate', today)
-      url.searchParams.set('dimensions', 'video')
-      url.searchParams.set(
-        'metrics',
-        'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,impressions,impressionClickThroughRate,subscribersGained,subscribersLost,shares'
-      )
-      url.searchParams.set('filters', `video==${filterValue}`)
-      url.searchParams.set('maxResults', String(BATCH_SIZE))
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: \`Bearer \${token}\` },
+    })
+    const data = await res.json()
 
-      const res = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const data = await res.json()
+    if (!res.ok) {
+      console.error('Analytics API error:', data)
+      throw new Error(data.error?.message || 'Analytics API error')
+    }
 
-      if (!res.ok) {
-        console.error('Analytics API error:', data)
-        throw new Error(
-          data.error?.message || `Analytics API error (batch ${i / BATCH_SIZE + 1})`
-        )
-      }
+    let totalUpdated = 0
 
-      if (data.rows && data.rows.length > 0) {
-        const updates = data.rows.map((row: any[]) => ({
-          youtube_id: row[0],
-          estimated_minutes_watched: row[1] || 0,
-          average_view_duration: row[2] || 0,
-          average_view_percentage: row[3] || 0,
-          impressions: row[4] || 0,
-          impressions_ctr: row[5] || 0,
-          subscribers_gained: row[6] || 0,
-          subscribers_lost: row[7] || 0,
-          shares: row[8] || 0,
-          analytics_synced_at: new Date().toISOString(),
-        }))
+    if (data.rows && data.rows.length > 0) {
+      const updates = data.rows.map((row: any[]) => ({
+        youtube_id: row[0],
+        estimated_minutes_watched: row[1] || 0,
+        average_view_duration: row[2] || 0,
+        average_view_percentage: row[3] || 0,
+        subscribers_gained: row[4] || 0,
+        subscribers_lost: row[5] || 0,
+        shares: row[6] || 0,
+        analytics_synced_at: new Date().toISOString(),
+      }))
 
+      for (let i = 0; i < updates.length; i += 500) {
+        const batch = updates.slice(i, i + 500)
         const { error: upsertError } = await supabase
           .from('videos')
-          .upsert(updates, { onConflict: 'youtube_id', ignoreDuplicates: false })
+          .upsert(batch, { onConflict: 'youtube_id', ignoreDuplicates: false })
 
         if (upsertError) {
           console.error('Upsert error:', upsertError)
           throw upsertError
         }
-
-        totalUpdated += updates.length
+        totalUpdated += batch.length
       }
     }
 
     return NextResponse.json({
       success: true,
       updated: totalUpdated,
-      total: allIds.length,
-      message: `Analytics synchronis\u00e9es pour ${totalUpdated} vid\u00e9os sur ${allIds.length}`,
+      total: videos.length,
+      message: \`Analytics synchronis\u00e9es pour \${totalUpdated} vid\u00e9os sur \${videos.length}\`,
     })
   } catch (error: any) {
     console.error('Analytics sync error:', error)

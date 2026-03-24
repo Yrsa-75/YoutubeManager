@@ -1,11 +1,12 @@
 'use client'
-import { useEffect, useState, useMemo } from 'react'
-import { ChevronUp, ChevronDown, Sparkles, ExternalLink, Settings2, Download } from 'lucide-react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
+import { ChevronUp, ChevronDown, Sparkles, ExternalLink, Settings2, Download, Filter } from 'lucide-react'
 import type { Video, ColorRule } from '@/types'
 import { formatNumber, formatDate, formatDuration, formatViewDuration, formatPercentage, formatMinutes } from '@/lib/utils/format'
 import { applyColorRules } from '@/lib/utils/colorRules'
 import VideoDetailPanel from './VideoDetailPanel'
 import ColumnManager from './ColumnManager'
+import AdvancedFilters, { type AdvancedFilter } from './AdvancedFilters'
 import toast from 'react-hot-toast'
 
 interface Props {
@@ -14,8 +15,8 @@ interface Props {
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   public: { label: 'Public', color: '#22c55e' },
-  private: { label: 'Privé', color: '#6b7280' },
-  unlisted: { label: 'Non répertorié', color: '#f97316' },
+  private: { label: 'Priv\u00e9', color: '#6b7280' },
+  unlisted: { label: 'Non r\u00e9pertori\u00e9', color: '#f97316' },
 }
 
 const COLOR_BG: Record<string, string> = {
@@ -35,13 +36,13 @@ const DEFAULT_COLUMNS = [
   { key: 'view_count', label: 'Vues', enabled: true },
   { key: 'like_count', label: 'Likes', enabled: true },
   { key: 'comment_count', label: 'Commentaires', enabled: true },
-  { key: 'duration', label: 'Durée', enabled: true },
-  { key: 'average_view_duration', label: 'Durée moy.', enabled: false },
-  { key: 'average_view_percentage', label: '% regardé', enabled: false },
-  { key: 'estimated_minutes_watched', label: 'Temps regardé', enabled: false },
+  { key: 'duration', label: 'Dur\u00e9e', enabled: true },
+  { key: 'average_view_duration', label: 'Dur\u00e9e moy.', enabled: false },
+  { key: 'average_view_percentage', label: '% regard\u00e9', enabled: false },
+  { key: 'estimated_minutes_watched', label: 'Temps regard\u00e9', enabled: false },
   { key: 'shares', label: 'Partages', enabled: false },
-  { key: 'subscribers_gained', label: 'Abonnés +', enabled: false },
-  { key: 'subscribers_lost', label: 'Abonnés -', enabled: false },
+  { key: 'subscribers_gained', label: 'Abonn\u00e9s +', enabled: false },
+  { key: 'subscribers_lost', label: 'Abonn\u00e9s -', enabled: false },
   { key: 'playlists', label: 'Playlists', enabled: false },
   { key: 'tags', label: 'Tags', enabled: false },
 ]
@@ -60,7 +61,15 @@ export default function VideoTable({ searchQuery }: Props) {
   const [colorRules, setColorRules] = useState<ColorRule[]>([])
   const [columns, setColumns] = useState(DEFAULT_COLUMNS)
   const [showColumnManager, setShowColumnManager] = useState(false)
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilter[]>([])
   const [exporting, setExporting] = useState(false)
+  const [columnsLoaded, setColumnsLoaded] = useState(false)
+
+  // Load persisted column config on mount
+  useEffect(() => {
+    loadColumnConfig()
+  }, [])
 
   useEffect(() => {
     fetchVideos()
@@ -71,6 +80,54 @@ export default function VideoTable({ searchQuery }: Props) {
     const handler = () => fetchVideos()
     window.addEventListener('youtube-sync-done', handler)
     return () => window.removeEventListener('youtube-sync-done', handler)
+  }, [])
+
+  // Save column config when it changes (after initial load)
+  useEffect(() => {
+    if (columnsLoaded) {
+      saveColumnConfig(columns)
+    }
+  }, [columns, columnsLoaded])
+
+  async function loadColumnConfig() {
+    try {
+      const res = await fetch('/api/column-config?table=uploaded')
+      const data = await res.json()
+      if (data.columns && data.columns.length > 0) {
+        // Merge persisted config with defaults (in case new columns were added)
+        const persistedMap = new Map(data.columns.map((c: any) => [c.key, c]))
+        const merged = [...data.columns.map((c: any) => {
+          const def = DEFAULT_COLUMNS.find(d => d.key === c.key)
+          return { key: c.key, label: c.label || def?.label || c.key, enabled: c.enabled, width: c.width || def?.width }
+        })]
+        // Add any new columns not in persisted config
+        DEFAULT_COLUMNS.forEach(def => {
+          if (!persistedMap.has(def.key)) {
+            merged.push(def)
+          }
+        })
+        setColumns(merged)
+      }
+    } catch (e) {
+      console.error('Failed to load column config:', e)
+    } finally {
+      setColumnsLoaded(true)
+    }
+  }
+
+  const saveColumnConfig = useCallback(async (cols: typeof columns) => {
+    try {
+      await fetch('/api/column-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tableKey: 'uploaded',
+          columns: cols.map((c, i) => ({ key: c.key, label: c.label, enabled: c.enabled, position: i, width: c.width })),
+        }),
+      })
+    } catch (e) {
+      console.error('Failed to save column config:', e)
+    }
   }, [])
 
   async function fetchVideos() {
@@ -110,29 +167,29 @@ export default function VideoTable({ searchQuery }: Props) {
         'Vues': v.view_count,
         'Likes': v.like_count,
         'Commentaires': v.comment_count,
-        'Durée': formatDuration(v.duration),
-        'Durée moy. visionnage': v.average_view_duration ? formatViewDuration(v.average_view_duration) : '',
-        '% regardé': v.average_view_percentage ? v.average_view_percentage.toFixed(1) + '%' : '',
-        'Temps regardé (min)': v.estimated_minutes_watched || 0,
+        'Dur\u00e9e': formatDuration(v.duration),
+        'Dur\u00e9e moy. visionnage': v.average_view_duration ? formatViewDuration(v.average_view_duration) : '',
+        '% regard\u00e9': v.average_view_percentage ? v.average_view_percentage.toFixed(1) + '%' : '',
+        'Temps regard\u00e9 (min)': v.estimated_minutes_watched || 0,
         'Partages': v.shares || 0,
-        'Abonnés gagnÃ©s': v.subscribers_gained || 0,
-        'Abonnés perdus': v.subscribers_lost || 0,
+        'Abonn\u00e9s gagn\u00e9s': v.subscribers_gained || 0,
+        'Abonn\u00e9s perdus': v.subscribers_lost || 0,
         'Playlists': (v.playlists || []).map(p => p.title).join(', '),
         'Tags': (v.tags || []).join(', '),
         'Description': v.description || '',
         'URL': 'https://youtube.com/watch?v=' + v.youtube_id,
-        'Catégorie couleur': v._color ? (colorRules.find(r => r.color === v._color)?.name || v._color) : '',
+        'Cat\u00e9gorie couleur': v._color ? (colorRules.find(r => r.color === v._color)?.name || v._color) : '',
       }))
       const ws = XLSX.utils.json_to_sheet(exportData)
       const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, ws, 'VidÃ©os')
+      XLSX.utils.book_append_sheet(wb, ws, 'Vid\u00e9os')
       const cols = Object.keys(exportData[0] || {}).map(key => ({
         wch: Math.max(key.length, ...exportData.slice(0, 50).map(r => String((r as any)[key] || '').length))
       }))
       ws['!cols'] = cols
       const date = new Date().toISOString().split('T')[0]
       XLSX.writeFile(wb, 'YoutubeManager-export-' + date + '.xlsx')
-      toast.success(filteredVideos.length + ' vidéos exportées !')
+      toast.success(filteredVideos.length + ' vid\u00e9os export\u00e9es !')
     } catch (e) {
       toast.error('Erreur export')
       console.error(e)
@@ -146,10 +203,30 @@ export default function VideoTable({ searchQuery }: Props) {
     [videos, colorRules]
   )
 
+  // Apply color filter + advanced filters
   const filteredVideos = useMemo(() => {
-    if (!colorFilter) return videosWithColors
-    return videosWithColors.filter(v => v._color === colorFilter)
-  }, [videosWithColors, colorFilter])
+    let result = videosWithColors
+    if (colorFilter) {
+      result = result.filter(v => v._color === colorFilter)
+    }
+    // Apply advanced filters
+    for (const filter of advancedFilters) {
+      result = result.filter(v => {
+        const val = (v as any)[filter.field]
+        if (val == null) return false
+        const numVal = Number(val)
+        switch (filter.operator) {
+          case 'gt': return numVal > filter.value
+          case 'gte': return numVal >= filter.value
+          case 'lt': return numVal < filter.value
+          case 'lte': return numVal <= filter.value
+          case 'eq': return numVal === filter.value
+          default: return true
+        }
+      })
+    }
+    return result
+  }, [videosWithColors, colorFilter, advancedFilters])
 
   function handleSort(col: string) {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -191,7 +268,8 @@ export default function VideoTable({ searchQuery }: Props) {
         const color = pct ? (pct >= 50 ? '#22c55e' : pct >= 30 ? '#f97316' : '#ef4444') : 'var(--text-muted)'
         return <span className="font-mono text-xs font-medium" style={{ color }}>{formatPercentage(pct)}</span>
       }
-      case 'estimated_minutes_watched':  return <span className="font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>{formatMinutes(video.estimated_minutes_watched)}</span>
+      case 'estimated_minutes_watched':
+        return <span className="font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>{formatMinutes(video.estimated_minutes_watched)}</span>
       case 'shares':
         return <span className="font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>{video.shares != null ? formatNumber(video.shares) : '\u2014'}</span>
       case 'subscribers_gained':
@@ -220,7 +298,7 @@ export default function VideoTable({ searchQuery }: Props) {
               borderColor: statusFilter === s ? 'rgba(230,57,70,0.3)' : 'var(--bg-border)',
               color: statusFilter === s ? 'var(--accent-red)' : 'var(--text-secondary)'
             }}>
-            {s === '' ? 'Tous' : s === 'public' ? 'Public' : s === 'private' ? 'Privé' : 'Non répertorié'}
+            {s === '' ? 'Tous' : s === 'public' ? 'Public' : s === 'private' ? 'Priv\u00e9' : 'Non r\u00e9pertori\u00e9'}
           </button>
         ))}
 
@@ -238,6 +316,20 @@ export default function VideoTable({ searchQuery }: Props) {
             {rule.name}
           </button>
         ))}
+
+        <div className="w-px h-4 mx-1" style={{ background: 'var(--bg-border)' }} />
+
+        {/* Advanced filters button */}
+        <button onClick={() => setShowAdvancedFilters(true)}
+          className="h-7 px-3 rounded-md text-xs font-medium border transition-all flex items-center gap-1.5"
+          style={{
+            background: advancedFilters.length > 0 ? 'rgba(230,57,70,0.12)' : 'var(--bg-card)',
+            borderColor: advancedFilters.length > 0 ? 'rgba(230,57,70,0.3)' : 'var(--bg-border)',
+            color: advancedFilters.length > 0 ? 'var(--accent-red)' : 'var(--text-muted)'
+          }}>
+          <Filter size={11} />
+          Filtres{advancedFilters.length > 0 ? ` (${advancedFilters.length})` : ''}
+        </button>
 
         <div className="ml-auto flex items-center gap-2">
           <button onClick={handleExport} disabled={exporting || filteredVideos.length === 0}
@@ -260,7 +352,7 @@ export default function VideoTable({ searchQuery }: Props) {
         <div className="flex-1 overflow-auto">
           {loading ? (
             <div className="flex items-center justify-center h-full" style={{ color: 'var(--text-muted)' }}>
-              <div className="text-sm">Chargement des vidéos...</div>
+              <div className="text-sm">Chargement des vid\u00e9os...</div>
             </div>
           ) : (
             <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
@@ -293,7 +385,7 @@ export default function VideoTable({ searchQuery }: Props) {
                 {filteredVideos.length === 0 ? (
                   <tr>
                     <td colSpan={activeColumns.length + 1} className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
-                      {searchQuery ? 'Aucune vidÃ©o ne correspond Ã  votre recherche' : 'Aucune vidÃ©o â cliquez sur "Synchroniser YouTube" pour commencer'}
+                      {searchQuery || advancedFilters.length > 0 ? 'Aucune vid\u00e9o ne correspond aux filtres' : 'Aucune vid\u00e9o \u2014 cliquez sur "Synchroniser YouTube" pour commencer'}
                     </td>
                   </tr>
                 ) : filteredVideos.map(video => {
@@ -322,7 +414,7 @@ export default function VideoTable({ searchQuery }: Props) {
                           <button onClick={e => { e.stopPropagation(); setSelectedVideo(video) }}
                             className="w-6 h-6 rounded flex items-center justify-center border transition-all"
                             style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-muted)' }}
-                            title="Générer avec IA">
+                            title="G\u00e9n\u00e9rer avec IA">
                             <Sparkles size={10} />
                           </button>
                           <a href={`https://youtube.com/watch?v=${video.youtube_id}`} target="_blank" rel="noreferrer"
@@ -349,12 +441,16 @@ export default function VideoTable({ searchQuery }: Props) {
 
       {/* Status bar */}
       <div className="flex items-center px-5 py-1.5 border-t gap-4 shrink-0" style={{ borderColor: 'var(--bg-border)', background: 'var(--bg-secondary)' }}>
-        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{formatNumber(total)} vidéos au total</span>
-        {colorFilter && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{filteredVideos.length} filtrées par couleur</span>}
+        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{formatNumber(total)} vid\u00e9os au total</span>
+        {(colorFilter || advancedFilters.length > 0) && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{filteredVideos.length} filtr\u00e9es</span>}
       </div>
 
       {showColumnManager && (
         <ColumnManager columns={columns} setColumns={setColumns} onClose={() => setShowColumnManager(false)} />
+      )}
+
+      {showAdvancedFilters && (
+        <AdvancedFilters filters={advancedFilters} setFilters={setAdvancedFilters} onClose={() => setShowAdvancedFilters(false)} />
       )}
     </div>
   )

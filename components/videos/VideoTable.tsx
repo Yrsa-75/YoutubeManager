@@ -36,13 +36,13 @@ const DEFAULT_COLUMNS = [
   { key: 'like_count', label: 'Likes', enabled: true },
   { key: 'comment_count', label: 'Commentaires', enabled: true },
   { key: 'duration', label: 'Durée', enabled: true },
-  { key: 'average_view_duration', label: 'Durée moy.', enabled: true },
-  { key: 'average_view_percentage', label: '% regardé', enabled: true },
+  { key: 'average_view_duration', label: 'Durée moy.', enabled: false },
+  { key: 'average_view_percentage', label: '% regardé', enabled: false },
   { key: 'estimated_minutes_watched', label: 'Temps regardé', enabled: false },
-  { key: 'shares', label: 'Partages', enabled: true },
+  { key: 'shares', label: 'Partages', enabled: false },
   { key: 'subscribers_gained', label: 'Abonnés +', enabled: false },
   { key: 'subscribers_lost', label: 'Abonnés -', enabled: false },
-  { key: 'playlists', label: 'Playlists', enabled: true },
+  { key: 'playlists', label: 'Playlists', enabled: false },
   { key: 'tags', label: 'Tags', enabled: false },
 ]
 

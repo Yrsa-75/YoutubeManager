@@ -10,40 +10,66 @@ export async function POST() {
     }
 
     const token = session.accessToken
-    let allVideos: any[] = []
+
+    // Step 1: Get the "uploads" playlist ID for the channel
+    const channelRes = await fetch(
+      'https://www.googleapis.com/youtube/v3/channels?part=contentDetails&mine=true',
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    const channelData = await channelRes.json()
+    if (!channelRes.ok) throw new Error(channelData.error?.message || 'Failed to get channel')
+
+    const uploadsPlaylistId =
+      channelData.items?.[0]?.contentDetails?.relatedPlaylists?.uploads
+    if (!uploadsPlaylistId) throw new Error('No uploads playlist found')
+
+    // Step 2: Paginate playlistItems.list to get all video IDs (1 unit/page instead of 100)
+    let allVideoIds: string[] = []
     let pageToken: string | undefined
 
     do {
-      const url = new URL('https://www.googleapis.com/youtube/v3/search')
-      url.searchParams.set('part', 'id')
-      url.searchParams.set('forMine', 'true')
-      url.searchParams.set('type', 'video')
+      const url = new URL('https://www.googleapis.com/youtube/v3/playlistItems')
+      url.searchParams.set('part', 'snippet')
+      url.searchParams.set('playlistId', uploadsPlaylistId)
       url.searchParams.set('maxResults', '50')
       if (pageToken) url.searchParams.set('pageToken', pageToken)
 
       const res = await fetch(url.toString(), {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error?.message || 'YouTube API error')
 
-      const ids = data.items?.map((item: any) => item.id.videoId) || []
-
-      if (ids.length > 0) {
-        const detailsUrl = new URL('https://www.googleapis.com/youtube/v3/videos')
-        detailsUrl.searchParams.set('part', 'snippet,statistics,contentDetails,status')
-        detailsUrl.searchParams.set('id', ids.join(','))
-
-        const detailsRes = await fetch(detailsUrl.toString(), {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-        const detailsData = await detailsRes.json()
-        allVideos.push(...(detailsData.items || []))
-      }
+      const ids = data.items?.map(
+        (item: any) => item.snippet?.resourceId?.videoId
+      ).filter(Boolean) || []
+      allVideoIds.push(...ids)
 
       pageToken = data.nextPageToken
-    } while (pageToken && allVideos.length < 500)
+    } while (pageToken && allVideoIds.length < 10000)
 
+    // Step 3: Get video details in batches of 50
+    let allVideos: any[] = []
+
+    for (let i = 0; i < allVideoIds.length; i += 50) {
+      const batch = allVideoIds.slice(i, i + 50)
+      const detailsUrl = new URL('https://www.googleapis.com/youtube/v3/videos')
+      detailsUrl.searchParams.set(
+        'part',
+        'snippet,statistics,contentDetails,status'
+      )
+      detailsUrl.searchParams.set('id', batch.join(','))
+
+      const detailsRes = await fetch(detailsUrl.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const detailsData = await detailsRes.json()
+      if (!detailsRes.ok)
+        throw new Error(detailsData.error?.message || 'Failed to get video details')
+      allVideos.push(...(detailsData.items || []))
+    }
+
+    // Step 4: Upsert to Supabase
     const { createClient } = await import('@supabase/supabase-js')
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -67,16 +93,26 @@ export async function POST() {
     }))
 
     if (videosToInsert.length > 0) {
-      const { error } = await supabase
-        .from('videos')
-        .upsert(videosToInsert, { onConflict: 'youtube_id' })
-      if (error) throw error
+      for (let i = 0; i < videosToInsert.length; i += 500) {
+        const batch = videosToInsert.slice(i, i + 500)
+        const { error } = await supabase
+          .from('videos')
+          .upsert(batch, { onConflict: 'youtube_id' })
+        if (error) throw error
+      }
     }
+
+    // Sync log
+    await supabase.from('sync_logs').insert({
+      videos_synced: videosToInsert.length,
+      status: 'success',
+      synced_at: new Date().toISOString(),
+    })
 
     return NextResponse.json({
       success: true,
       synced: videosToInsert.length,
-      message: `${videosToInsert.length} vidéos synchronisées`
+      message: `${videosToInsert.length} vid\u00e9os synchronis\u00e9es`,
     })
   } catch (error: any) {
     console.error('Sync error:', error)

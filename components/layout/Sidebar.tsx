@@ -13,32 +13,41 @@ interface Props {
 export default function Sidebar({ activeTab, setActiveTab }: Props) {
   const { data: session } = useSession()
   const [syncing, setSyncing] = useState(false)
-  const [lastSync, setLastSync] = useState<string | null>(null)
+  const [syncStatus, setSyncStatus] = useState<string | null>(null)
 
   async function handleSync() {
     setSyncing(true)
+    setSyncStatus('Vidéos...')
     try {
-      const res = await fetch('/api/youtube/sync', { method: 'POST' })
+      const res = await fetch('/api/youtube/sync-all', { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      toast.success(`${data.synced} vidéos synchronisées`)
-      setLastSync('a l instant')
+      const parts = []
+      if (data.videos > 0) parts.push(data.videos + ' vidéos')
+      if (data.analytics > 0) parts.push(data.analytics + ' analytics')
+      if (data.playlists > 0) parts.push(data.playlists + ' playlists')
+      toast.success(parts.join(', ') || 'Synchronisé !')
+      if (data.errors && data.errors.length > 0) {
+        data.errors.forEach((e: string) => toast.error(e, { duration: 5000 }))
+      }
+      setSyncStatus('Terminé')
       window.dispatchEvent(new CustomEvent('youtube-sync-done'))
     } catch (e: any) {
       toast.error('Erreur sync : ' + e.message)
+      setSyncStatus(null)
     } finally {
       setSyncing(false)
     }
   }
 
-  const navItems: { id: TabType | null; icon: any; label: string; badge?: string; section: string }[] = [
+  const navItems: { id: TabType | null; icon: any; label: string; section: string }[] = [
     { id: 'uploaded', icon: Play, label: 'Vidéos uploadées', section: 'Catalogue' },
     { id: 'pending', icon: Clock, label: 'À uploader', section: 'Catalogue' },
     { id: 'rules', icon: Palette, label: 'Règles couleurs', section: 'Outils' },
     { id: null, icon: BarChart2, label: 'Analytics (bientôt)', section: 'Outils' },
   ]
 
-const sections = Array.from(new Set(navItems.map(i => i.section)))
+  const sections = Array.from(new Set(navItems.map(i => i.section)))
 
   return (
     <aside className="w-[220px] min-w-[220px] flex flex-col h-screen border-r" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--bg-border)' }}>
@@ -75,17 +84,9 @@ const sections = Array.from(new Set(navItems.map(i => i.section)))
               const isActive = item.id && activeTab === item.id
               const isDisabled = !item.id
               return (
-                <button
-                  key={item.label}
-                  disabled={isDisabled}
-                  onClick={() => item.id && setActiveTab(item.id)}
+                <button key={item.label} disabled={isDisabled} onClick={() => item.id && setActiveTab(item.id)}
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left mb-0.5 text-xs font-medium transition-all relative"
-                  style={{
-                    background: isActive ? 'var(--accent-red-dim, rgba(230,57,70,0.12))' : 'transparent',
-                    color: isActive ? 'var(--accent-red)' : isDisabled ? 'var(--text-muted)' : 'var(--text-secondary)',
-                    cursor: isDisabled ? 'default' : 'pointer',
-                  }}
-                >
+                  style={{ background: isActive ? 'var(--accent-red-dim, rgba(230,57,70,0.12))' : 'transparent', color: isActive ? 'var(--accent-red)' : isDisabled ? 'var(--text-muted)' : 'var(--text-secondary)', cursor: isDisabled ? 'default' : 'pointer' }}>
                   {isActive && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-3/5 rounded-r" style={{ background: 'var(--accent-red)' }} />}
                   <Icon size={14} />
                   <span>{item.label}</span>
@@ -98,20 +99,15 @@ const sections = Array.from(new Set(navItems.map(i => i.section)))
 
       {/* Footer */}
       <div className="p-3 border-t space-y-2" style={{ borderColor: 'var(--bg-border)' }}>
-        <button
-          onClick={handleSync}
-          disabled={syncing}
+        <button onClick={handleSync} disabled={syncing}
           className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border text-xs font-medium transition-all"
-          style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)' }}
-        >
+          style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)' }}>
           <RefreshCw size={12} className={syncing ? 'animate-spin' : ''} />
-          {syncing ? 'Synchronisation...' : lastSync ? `Sync — ${lastSync}` : 'Synchroniser YouTube'}
+          {syncing ? (syncStatus || 'Synchronisation...') : syncStatus === 'Terminé' ? 'Synchronisé ✓' : 'Synchroniser YouTube'}
         </button>
-        <button
-          onClick={() => signOut()}
+        <button onClick={() => signOut()}
           className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs transition-all"
-          style={{ color: 'var(--text-muted)' }}
-        >
+          style={{ color: 'var(--text-muted)' }}>
           <LogOut size={12} />
           Déconnexion
         </button>

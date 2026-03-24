@@ -26,14 +26,55 @@ export async function GET(req: NextRequest) {
     }
     if (status) query = query.eq('status', status)
 
-    query = query
-      .order(sortBy, { ascending: sortDir === 'asc' })
-      .range(offset, offset + limit - 1)
+    query = query.order(sortBy, { ascending: sortDir === 'asc' })
+    query = query.range(offset, offset + limit - 1)
 
-    const { data, error, count } = await query
-    if (error) throw error
+    const { data: videos, count, error } = await query
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    return NextResponse.json({ videos: data || [], total: count || 0, page, limit })
+    // Join playlists for each video
+    let videosWithPlaylists = videos || []
+    if (videosWithPlaylists.length > 0) {
+      const youtubeIds = videosWithPlaylists.map(v => v.youtube_id)
+
+      const { data: associations } = await supabase
+        .from('video_playlists')
+        .select('youtube_id, playlist_id')
+        .in('youtube_id', youtubeIds)
+
+      if (associations && associations.length > 0) {
+        const playlistIds = [...new Set(associations.map(a => a.playlist_id))]
+        const { data: playlists } = await supabase
+          .from('playlists')
+          .select('playlist_id, title')
+          .in('playlist_id', playlistIds)
+
+        const playlistMap = new Map((playlists || []).map(p => [p.playlist_id, p.title]))
+
+        const videoPlaylistsMap = new Map<string, { playlist_id: string; title: string }[]>()
+        for (const a of associations) {
+          if (!videoPlaylistsMap.has(a.youtube_id)) videoPlaylistsMap.set(a.youtube_id, [])
+          videoPlaylistsMap.get(a.youtube_id)!.push({
+            playlist_id: a.playlist_id,
+            title: playlistMap.get(a.playlist_id) || a.playlist_id,
+          })
+        }
+
+        videosWithPlaylists = videosWithPlaylists.map(v => ({
+          ...v,
+          playlists: videoPlaylistsMap.get(v.youtube_id) || [],
+        }))
+      } else {
+        videosWithPlaylists = videosWithPlaylists.map(v => ({ ...v, playlists: [] }))
+      }
+    }
+
+    return NextResponse.json({
+      videos: videosWithPlaylists,
+      total: count || 0,
+      page,
+      limit,
+    })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }

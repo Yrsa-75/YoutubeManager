@@ -14,8 +14,8 @@ interface Props {
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   public: { label: 'Public', color: '#22c55e' },
-  private: { label: 'PrivÃ©', color: '#6b7280' },
-  unlisted: { label: 'Non rÃ©pertoriÃ©', color: '#f97316' },
+  private: { label: 'Privé', color: '#6b7280' },
+  unlisted: { label: 'Non répertorié', color: '#f97316' },
 }
 
 const COLOR_BG: Record<string, string> = {
@@ -35,13 +35,13 @@ const DEFAULT_COLUMNS = [
   { key: 'view_count', label: 'Vues', enabled: true },
   { key: 'like_count', label: 'Likes', enabled: true },
   { key: 'comment_count', label: 'Commentaires', enabled: true },
-  { key: 'duration', label: 'DurÃ©e', enabled: true },
-  { key: 'average_view_duration', label: 'DurÃ©e moy.', enabled: true },
-  { key: 'average_view_percentage', label: '% regardÃ©', enabled: true },
-  { key: 'estimated_minutes_watched', label: 'Temps regardÃ©', enabled: false },
+  { key: 'duration', label: 'Durée', enabled: true },
+  { key: 'average_view_duration', label: 'Durée moy.', enabled: true },
+  { key: 'average_view_percentage', label: '% regardé', enabled: true },
+  { key: 'estimated_minutes_watched', label: 'Temps regardé', enabled: false },
   { key: 'shares', label: 'Partages', enabled: true },
-  { key: 'subscribers_gained', label: 'AbonnÃ©s +', enabled: false },
-  { key: 'subscribers_lost', label: 'AbonnÃ©s -', enabled: false },
+  { key: 'subscribers_gained', label: 'Abonnés +', enabled: false },
+  { key: 'subscribers_lost', label: 'Abonnés -', enabled: false },
   { key: 'playlists', label: 'Playlists', enabled: true },
   { key: 'tags', label: 'Tags', enabled: false },
 ]
@@ -110,18 +110,18 @@ export default function VideoTable({ searchQuery }: Props) {
         'Vues': v.view_count,
         'Likes': v.like_count,
         'Commentaires': v.comment_count,
-        'DurÃ©e': formatDuration(v.duration),
-        'DurÃ©e moy. visionnage': v.average_view_duration ? formatViewDuration(v.average_view_duration) : '',
-        '% regardÃ©': v.average_view_percentage ? v.average_view_percentage.toFixed(1) + '%' : '',
-        'Temps regardÃ© (min)': v.estimated_minutes_watched || 0,
+        'Durée': formatDuration(v.duration),
+        'Durée moy. visionnage': v.average_view_duration ? formatViewDuration(v.average_view_duration) : '',
+        '% regardé': v.average_view_percentage ? v.average_view_percentage.toFixed(1) + '%' : '',
+        'Temps regardé (min)': v.estimated_minutes_watched || 0,
         'Partages': v.shares || 0,
-        'AbonnÃ©s gagnÃ©s': v.subscribers_gained || 0,
-        'AbonnÃ©s perdus': v.subscribers_lost || 0,
+        'Abonnés gagnÃ©s': v.subscribers_gained || 0,
+        'Abonnés perdus': v.subscribers_lost || 0,
         'Playlists': (v.playlists || []).map(p => p.title).join(', '),
         'Tags': (v.tags || []).join(', '),
         'Description': v.description || '',
         'URL': 'https://youtube.com/watch?v=' + v.youtube_id,
-        'CatÃ©gorie couleur': v._color ? (colorRules.find(r => r.color === v._color)?.name || v._color) : '',
+        'Catégorie couleur': v._color ? (colorRules.find(r => r.color === v._color)?.name || v._color) : '',
       }))
       const ws = XLSX.utils.json_to_sheet(exportData)
       const wb = XLSX.utils.book_new()
@@ -132,7 +132,7 @@ export default function VideoTable({ searchQuery }: Props) {
       ws['!cols'] = cols
       const date = new Date().toISOString().split('T')[0]
       XLSX.writeFile(wb, 'YoutubeManager-export-' + date + '.xlsx')
-      toast.success(filteredVideos.length + ' vidÃ©os exportÃ©es !')
+      toast.success(filteredVideos.length + ' vidéos exportées !')
     } catch (e) {
       toast.error('Erreur export')
       console.error(e)
@@ -220,7 +220,7 @@ export default function VideoTable({ searchQuery }: Props) {
               borderColor: statusFilter === s ? 'rgba(230,57,70,0.3)' : 'var(--bg-border)',
               color: statusFilter === s ? 'var(--accent-red)' : 'var(--text-secondary)'
             }}>
-            {s === '' ? 'Tous' : s === 'public' ? 'Public' : s === 'private' ? 'PrivÃ©' : 'Non rÃ©pertoriÃ©'}
+            {s === '' ? 'Tous' : s === 'public' ? 'Public' : s === 'private' ? 'Privé' : 'Non répertorié'}
           </button>
         ))}
 
@@ -260,7 +260,7 @@ export default function VideoTable({ searchQuery }: Props) {
         <div className="flex-1 overflow-auto">
           {loading ? (
             <div className="flex items-center justify-center h-full" style={{ color: 'var(--text-muted)' }}>
-              <div className="text-sm">Chargement des vidÃ©os...</div>
+              <div className="text-sm">Chargement des vidéos...</div>
             </div>
           ) : (
             <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
@@ -322,7 +322,7 @@ export default function VideoTable({ searchQuery }: Props) {
                           <button onClick={e => { e.stopPropagation(); setSelectedVideo(video) }}
                             className="w-6 h-6 rounded flex items-center justify-center border transition-all"
                             style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-muted)' }}
-                            title="GÃ©nÃ©rer avec IA">
+                            title="Générer avec IA">
                             <Sparkles size={10} />
                           </button>
                           <a href={`https://youtube.com/watch?v=${video.youtube_id}`} target="_blank" rel="noreferrer"
@@ -349,8 +349,8 @@ export default function VideoTable({ searchQuery }: Props) {
 
       {/* Status bar */}
       <div className="flex items-center px-5 py-1.5 border-t gap-4 shrink-0" style={{ borderColor: 'var(--bg-border)', background: 'var(--bg-secondary)' }}>
-        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{formatNumber(total)} vidÃ©os au total</span>
-        {colorFilter && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{filteredVideos.length} filtrÃ©es par couleur</span>}
+        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{formatNumber(total)} vidéos au total</span>
+        {colorFilter && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{filteredVideos.length} filtrées par couleur</span>}
       </div>
 
       {showColumnManager && (

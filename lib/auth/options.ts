@@ -1,4 +1,4 @@
-import type { NextAuthOptions } from 'next-auth'
+import { NextAuthOptions } from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
 import { createClient } from '@supabase/supabase-js'
 
@@ -10,7 +10,9 @@ export const authOptions: NextAuthOptions = {
       authorization: {
         params: {
           scope: [
-            'openid', 'email', 'profile',
+            'openid',
+            'email',
+            'profile',
             'https://www.googleapis.com/auth/youtube.readonly',
             'https://www.googleapis.com/auth/yt-analytics.readonly',
           ].join(' '),
@@ -25,7 +27,9 @@ export const authOptions: NextAuthOptions = {
       if (account) {
         token.accessToken = account.access_token
         token.refreshToken = account.refresh_token
-        token.accessTokenExpires = account.expires_at
+        token.expiresAt = account.expires_at
+
+        // Store token in Supabase
         try {
           const supabase = createClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL!,

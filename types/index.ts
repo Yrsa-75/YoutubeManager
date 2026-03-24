@@ -14,6 +14,16 @@ export interface Video {
   comment_count: number
   synced_at: string
   color_rule?: string
+  // Analytics fields
+  estimated_minutes_watched?: number
+  average_view_duration?: number
+  average_view_percentage?: number
+  subscribers_gained?: number
+  subscribers_lost?: number
+  shares?: number
+  analytics_synced_at?: string
+  // Playlists (joined from video_playlists)
+  playlists?: { playlist_id: string; title: string }[]
 }
 
 export interface PendingVideo {

@@ -51,8 +51,12 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
 
   return (
     <aside className="w-[220px] min-w-[220px] flex flex-col h-screen border-r" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--bg-border)' }}>
+      {/* Project name */}
+      <div className="px-5 pt-3 pb-1">
+        <span className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--text-muted)' }}>KAIROS</span>
+      </div>
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-5 py-4 border-b" style={{ borderColor: 'var(--bg-border)' }}>
+      <div className="flex items-center gap-2.5 px-5 pb-4 border-b" style={{ borderColor: 'var(--bg-border)' }}>
         <div className="w-8 h-6 rounded-md flex items-center justify-center" style={{ background: 'var(--accent-red)' }}>
           <div className="w-0 h-0 border-t-[5px] border-t-transparent border-b-[5px] border-b-transparent border-l-[9px] border-l-white ml-0.5" />
         </div>

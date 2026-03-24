@@ -26,7 +26,7 @@ export async function POST() {
       return NextResponse.json({
         success: true,
         updated: 0,
-        message: 'Aucune vidéo à synchroniser. Lance d\'abord la sync YouTube.',
+        message: 'Aucune vidéo à synchroniser.',
       })
     }
 
@@ -35,29 +35,42 @@ export async function POST() {
       : '2005-01-01'
     const today = new Date().toISOString().split('T')[0]
 
-    const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
-    url.searchParams.set('ids', 'channel==MINE')
-    url.searchParams.set('startDate', oldestDate)
-    url.searchParams.set('endDate', today)
-    url.searchParams.set('dimensions', 'video')
-    url.searchParams.set('metrics', 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares')
-    url.searchParams.set('maxResults', '500')
-    url.searchParams.set('sort', '-estimatedMinutesWatched')
+    // YouTube Analytics API: max 200 results per query, paginate with startIndex
+    let allRows: any[][] = []
+    let startIndex = 1
+    const PAGE_SIZE = 200
 
-    const res = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    const data = await res.json()
+    while (true) {
+      const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
+      url.searchParams.set('ids', 'channel==MINE')
+      url.searchParams.set('startDate', oldestDate)
+      url.searchParams.set('endDate', today)
+      url.searchParams.set('dimensions', 'video')
+      url.searchParams.set('metrics', 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares')
+      url.searchParams.set('maxResults', String(PAGE_SIZE))
+      url.searchParams.set('startIndex', String(startIndex))
+      url.searchParams.set('sort', '-estimatedMinutesWatched')
 
-    if (!res.ok) {
-      console.error('Analytics API error:', data)
-      throw new Error(data.error?.message || 'Analytics API error')
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        console.error('Analytics API error:', data)
+        throw new Error(data.error?.message || 'Analytics API error')
+      }
+
+      if (!data.rows || data.rows.length === 0) break
+      allRows.push(...data.rows)
+      if (data.rows.length < PAGE_SIZE) break
+      startIndex += PAGE_SIZE
     }
 
     let totalUpdated = 0
 
-    if (data.rows && data.rows.length > 0) {
-      const updates = data.rows.map((row: any[]) => ({
+    if (allRows.length > 0) {
+      const updates = allRows.map((row: any[]) => ({
         youtube_id: row[0],
         estimated_minutes_watched: row[1] || 0,
         average_view_duration: row[2] || 0,
@@ -74,10 +87,7 @@ export async function POST() {
           .from('videos')
           .upsert(batch, { onConflict: 'youtube_id', ignoreDuplicates: false })
 
-        if (upsertError) {
-          console.error('Upsert error:', upsertError)
-          throw upsertError
-        }
+        if (upsertError) throw upsertError
         totalUpdated += batch.length
       }
     }

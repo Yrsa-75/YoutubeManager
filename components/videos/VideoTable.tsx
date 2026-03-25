@@ -37,7 +37,7 @@ const DEFAULT_COLUMNS = [
   { key: 'like_count', label: 'Likes', enabled: true },
   { key: 'comment_count', label: 'Commentaires', enabled: true },
   { key: 'duration', label: 'Dur\u00e9e', enabled: true },
-  { key: 'average_view_duration', label: 'Dur\u00e9e moy.', enabled: false },
+  { key: 'average_view_duration', label: 'Dur\u00e9e visionnage moyen', enabled: false },
   { key: 'average_view_percentage', label: '% regard\u00e9', enabled: false },
   { key: 'estimated_minutes_watched', label: 'Temps regard\u00e9', enabled: false },
   { key: 'shares', label: 'Partages', enabled: false },

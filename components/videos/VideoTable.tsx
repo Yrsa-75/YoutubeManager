@@ -317,19 +317,7 @@ export default function VideoTable({ searchQuery }: Props) {
           </button>
         ))}
 
-        <div className="w-px h-4 mx-1" style={{ background: 'var(--bg-border)' }} />
 
-        {/* Advanced filters button */}
-        <button onClick={() => setShowAdvancedFilters(true)}
-          className="h-7 px-3 rounded-md text-xs font-medium border transition-all flex items-center gap-1.5"
-          style={{
-            background: advancedFilters.length > 0 ? 'rgba(230,57,70,0.12)' : 'var(--bg-card)',
-            borderColor: advancedFilters.length > 0 ? 'rgba(230,57,70,0.3)' : 'var(--bg-border)',
-            color: advancedFilters.length > 0 ? 'var(--accent-red)' : 'var(--text-muted)'
-          }}>
-          <Filter size={11} />
-          Filtres{advancedFilters.length > 0 ? ` (${advancedFilters.length})` : ''}
-        </button>
 
         <div className="ml-auto flex items-center gap-2">
           <button onClick={handleExport} disabled={exporting || filteredVideos.length === 0}

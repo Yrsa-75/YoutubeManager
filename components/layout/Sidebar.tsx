@@ -43,7 +43,7 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
   const navItems: { id: TabType | null; icon: any; label: string; section: string }[] = [
     { id: 'uploaded', icon: Play, label: 'Vidéos uploadées', section: 'Catalogue' },
     { id: 'pending', icon: Clock, label: 'À uploader', section: 'Catalogue' },
-    { id: 'rules', icon: Palette, label: 'Règles couleurs', section: 'Outils' },
+    { id: 'rules', icon: Palette, label: 'Filtres', section: 'Outils' },
     { id: null, icon: BarChart2, label: 'Analytics (bientôt)', section: 'Outils' },
   ]
 

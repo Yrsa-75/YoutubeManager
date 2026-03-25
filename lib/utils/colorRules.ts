@@ -1,15 +1,16 @@
 import type { Video, ColorRule } from '@/types'
 import { differenceInDays, parseISO } from 'date-fns'
 
-export function applyColorRules(video: Video, rules: ColorRule[]): string {
+export function applyColorRules(video: Video, rules: ColorRule[]): string[] {
   const enabledRules = rules
     .filter((r: ColorRule) => r.enabled)
     .sort((a: ColorRule, b: ColorRule) => a.priority - b.priority)
 
+  const colors: string[] = []
   for (const rule of enabledRules) {
-    if (matchesRule(video, rule)) return rule.color
+    if (matchesRule(video, rule)) colors.push(rule.color)
   }
-  return ''
+  return colors
 }
 
 function matchesRule(video: Video, rule: ColorRule): boolean {

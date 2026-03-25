@@ -207,7 +207,7 @@ export default function VideoTable({ searchQuery }: Props) {
   const filteredVideos = useMemo(() => {
     let result = videosWithColors
     if (colorFilter) {
-      result = result.filter(v => v._colors.includes(colorFilter))
+      result = result.filter(v => (v._colors || []).includes(colorFilter))
     }
     // Apply advanced filters
     for (const filter of advancedFilters) {
@@ -378,7 +378,7 @@ export default function VideoTable({ searchQuery }: Props) {
                   </tr>
                 ) : filteredVideos.map(video => {
                   const isSelected = selectedVideo?.youtube_id === video.youtube_id
-                  const colorBg = video._colors.length > 0 ? (COLOR_BG[video._colors[0]] || 'transparent') : 'transparent'
+                  const colorBg = (video._colors || []).length > 0 ? (COLOR_BG[video._colors[0]] || 'transparent') : 'transparent'
                   return (
                     <tr key={video.youtube_id}
                       onClick={() => setSelectedVideo(isSelected ? null : video)}
@@ -388,16 +388,16 @@ export default function VideoTable({ searchQuery }: Props) {
                         <td key={col.key} className="px-3 py-2 border-b"
                           style={{
                             borderColor: 'rgba(34,34,46,0.5)',
-                            borderLeft: colIndex === 0 && video._colors.length === 1 ? `3px solid ${video._colors[0]}` : colIndex === 0 ? '3px solid transparent' : undefined,
-                            position: colIndex === 0 && video._colors.length > 1 ? 'relative' : undefined,
+                            borderLeft: colIndex === 0 && (video._colors || []).length === 1 ? `3px solid ${video._colors[0]}` : colIndex === 0 ? '3px solid transparent' : undefined,
+                            position: colIndex === 0 && (video._colors || []).length > 1 ? 'relative' : undefined,
                             maxWidth: col.width || 200,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
                           }}>
-                          {colIndex === 0 && video._colors.length > 1 && (
+                          {colIndex === 0 && (video._colors || []).length > 1 && (
                             <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, display: 'flex', flexDirection: 'column' }}>
-                              {video._colors.map((c: string, ci: number) => (
+                              {(video._colors || []).map((c: string, ci: number) => (
                                 <div key={ci} style={{ flex: 1, background: c }} />
                               ))}
                             </div>

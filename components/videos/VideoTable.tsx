@@ -395,6 +395,13 @@ export default function VideoTable({ searchQuery }: Props) {
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
                           }}>
+                          {colIndex === 0 && video._colors.length > 1 && (
+                            <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, display: 'flex', flexDirection: 'column' }}>
+                              {video._colors.map((c: string, ci: number) => (
+                                <div key={ci} style={{ flex: 1, background: c }} />
+                              ))}
+                            </div>
+                          )}
                           {renderCell(video, col.key)}
                         </td>
                       ))}

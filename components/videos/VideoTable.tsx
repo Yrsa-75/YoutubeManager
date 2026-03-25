@@ -199,7 +199,13 @@ export default function VideoTable({ searchQuery }: Props) {
   }
 
   const videosWithColors = useMemo<VideoWithColor[]>(
-    () => videos.map(v => ({ ...v, _colors: applyColorRules(v, colorRules) })),
+    () => videos.map(v => {
+      const color = applyColorRules(v, colorRules)
+      let colors: string[] = []
+      try { colors = applyAllColorRules(v, colorRules) } catch { colors = color ? [color] : [] }
+      if (!Array.isArray(colors)) colors = color ? [color] : []
+      return { ...v, _color: color, _colors: colors }
+    }),
     [videos, colorRules]
   )
 

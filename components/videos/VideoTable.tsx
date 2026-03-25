@@ -388,8 +388,8 @@ export default function VideoTable({ searchQuery }: Props) {
                         <td key={col.key} className="px-3 py-2 border-b"
                           style={{
                             borderColor: 'rgba(34,34,46,0.5)',
-                            borderLeft: colIndex === 0 ? '3px solid transparent' : undefined,
-                            borderImage: colIndex === 0 && video._colors.length > 0 ? `linear-gradient(to bottom, ${video._colors.map((c, i) => `${c} ${(i/video._colors.length)*100}%, ${c} ${((i+1)/video._colors.length)*100}%`).join(', ')}) 1` : undefined,
+                            borderLeft: colIndex === 0 && video._colors.length === 1 ? `3px solid ${video._colors[0]}` : colIndex === 0 ? '3px solid transparent' : undefined,
+                            position: colIndex === 0 && video._colors.length > 1 ? 'relative' : undefined,
                             maxWidth: col.width || 200,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',

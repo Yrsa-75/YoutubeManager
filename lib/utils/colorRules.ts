@@ -1,16 +1,22 @@
 import type { Video, ColorRule } from '@/types'
 import { differenceInDays, parseISO } from 'date-fns'
 
-export function applyColorRules(video: Video, rules: ColorRule[]): string[] {
+export function applyAllColorRules(video: Video, rules: ColorRule[]): string[] {
+  return rules
+    .filter((r: ColorRule) => r.enabled)
+    .sort((a: ColorRule, b: ColorRule) => a.priority - b.priority)
+    .filter((rule: ColorRule) => matchesRule(video, rule))
+    .map((rule: ColorRule) => rule.color)
+}
+
+export function applyColorRules(video: Video, rules: ColorRule[]): string {
   const enabledRules = rules
     .filter((r: ColorRule) => r.enabled)
     .sort((a: ColorRule, b: ColorRule) => a.priority - b.priority)
-
-  const colors: string[] = []
   for (const rule of enabledRules) {
-    if (matchesRule(video, rule)) colors.push(rule.color)
+    if (matchesRule(video, rule)) return rule.color
   }
-  return colors
+  return ''
 }
 
 function matchesRule(video: Video, rule: ColorRule): boolean {
@@ -20,14 +26,12 @@ function matchesRule(video: Video, rule: ColorRule): boolean {
 
 function matchesCondition(video: Video, cond: any): boolean {
   let fieldValue: number | string = 0
-
   switch (cond.field) {
     case 'view_count': fieldValue = video.view_count; break
     case 'like_count': fieldValue = video.like_count; break
     case 'comment_count': fieldValue = video.comment_count; break
     case 'days_since_upload':
-      try { fieldValue = differenceInDays(new Date(), parseISO(video.published_at)) }
-      catch { fieldValue = 0 }
+      try { fieldValue = differenceInDays(new Date(), parseISO(video.published_at)) } catch { fieldValue = 0 }
       break
     case 'status': fieldValue = video.status; break
     case 'average_view_duration': fieldValue = video.average_view_duration || 0; break
@@ -38,11 +42,8 @@ function matchesCondition(video: Video, cond: any): boolean {
     case 'subscribers_lost': fieldValue = video.subscribers_lost || 0; break
     default: fieldValue = (video as any)[cond.field] || 0
   }
-
-  // Support both "operator" and "op" field names
   const operator = cond.operator || cond.op
   const val = Number(cond.value)
-
   switch (operator) {
     case 'gt': return Number(fieldValue) > val
     case 'lt': return Number(fieldValue) < val

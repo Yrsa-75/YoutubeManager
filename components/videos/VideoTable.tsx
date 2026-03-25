@@ -47,7 +47,7 @@ const DEFAULT_COLUMNS = [
   { key: 'tags', label: 'Tags', enabled: false },
 ]
 
-type VideoWithColor = Video & { _color: string }
+type VideoWithColor = Video & { _colors: string[] }
 
 export default function VideoTable({ searchQuery }: Props) {
   const [videos, setVideos] = useState<Video[]>([])
@@ -178,7 +178,7 @@ export default function VideoTable({ searchQuery }: Props) {
         'Tags': (v.tags || []).join(', '),
         'Description': v.description || '',
         'URL': 'https://youtube.com/watch?v=' + v.youtube_id,
-        'Cat\u00e9gorie couleur': v._color ? (colorRules.find(r => r.color === v._color)?.name || v._color) : '',
+        'Cat\u00e9gorie couleur': v._colors.length > 0 ? v._colors.map(c => colorRules.find(r => r.color === c)?.name || c).join(', ') : '',
       }))
       const ws = XLSX.utils.json_to_sheet(exportData)
       const wb = XLSX.utils.book_new()
@@ -199,7 +199,7 @@ export default function VideoTable({ searchQuery }: Props) {
   }
 
   const videosWithColors = useMemo<VideoWithColor[]>(
-    () => videos.map(v => ({ ...v, _color: applyColorRules(v, colorRules) })),
+    () => videos.map(v => ({ ...v, _colors: applyColorRules(v, colorRules) })),
     [videos, colorRules]
   )
 
@@ -207,7 +207,7 @@ export default function VideoTable({ searchQuery }: Props) {
   const filteredVideos = useMemo(() => {
     let result = videosWithColors
     if (colorFilter) {
-      result = result.filter(v => v._color === colorFilter)
+      result = result.filter(v => v._colors.includes(colorFilter))
     }
     // Apply advanced filters
     for (const filter of advancedFilters) {
@@ -378,7 +378,7 @@ export default function VideoTable({ searchQuery }: Props) {
                   </tr>
                 ) : filteredVideos.map(video => {
                   const isSelected = selectedVideo?.youtube_id === video.youtube_id
-                  const colorBg = video._color ? (COLOR_BG[video._color] || 'transparent') : 'transparent'
+                  const colorBg = video._colors.length > 0 ? (COLOR_BG[video._colors[0]] || 'transparent') : 'transparent'
                   return (
                     <tr key={video.youtube_id}
                       onClick={() => setSelectedVideo(isSelected ? null : video)}
@@ -388,7 +388,8 @@ export default function VideoTable({ searchQuery }: Props) {
                         <td key={col.key} className="px-3 py-2 border-b"
                           style={{
                             borderColor: 'rgba(34,34,46,0.5)',
-                            borderLeft: colIndex === 0 && video._color ? `3px solid ${video._color}` : colIndex === 0 ? '3px solid transparent' : undefined,
+                            borderLeft: colIndex === 0 ? '3px solid transparent' : undefined,
+                            borderImage: colIndex === 0 && video._colors.length > 0 ? `linear-gradient(to bottom, ${video._colors.map((c, i) => `${c} ${(i/video._colors.length)*100}%, ${c} ${((i+1)/video._colors.length)*100}%`).join(', ')}) 1` : undefined,
                             maxWidth: col.width || 200,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',

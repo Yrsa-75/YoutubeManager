@@ -1,5 +1,4 @@
 'use client'
-import Image from 'next/image'
 import { signOut, useSession } from 'next-auth/react'
 import { Play, Clock, Palette, RefreshCw, LogOut, BarChart2 } from 'lucide-react'
 import type { TabType } from '@/types'
@@ -53,9 +52,9 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
   return (
     <aside className="w-[220px] min-w-[220px] flex flex-col h-screen border-r" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--bg-border)' }}>
       {/* Project name */}
-      <div className="px-5 pt-3 pb-1">
-        <Image src="/kairos-logo.png" alt="KAIROS" width={40} height={40} style={{ borderRadius: 8 }} />
-              <span className="font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--text-muted)', fontSize: '30px' }}>KAIROS</span>
+      <div className="flex items-center gap-3 px-5 pt-3 pb-1">
+        <img src="/kairos-logo.png" alt="KAIROS" width={40} height={40} style={{ borderRadius: 8 }} />
+        <span className="font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--text-muted)', fontSize: '30px' }}>KAIROS</span>
       </div>
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 pb-4 border-b" style={{ borderColor: 'var(--bg-border)' }}>

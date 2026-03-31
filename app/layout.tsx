@@ -10,8 +10,8 @@ export const metadata: Metadata = {
   title: 'YoutubeManager',
   description: 'Gérez votre catalogue YouTube comme un pro',
   icons: {
-    icon: [
-      { url: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="%23e63946"/><polygon points="13,10 13,22 23,16" fill="white"/></svg>' }
+    icon: '/favicon.png',
+  }
     ]
   }
 }

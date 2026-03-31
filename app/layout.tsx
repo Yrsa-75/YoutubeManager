@@ -11,9 +11,7 @@ export const metadata: Metadata = {
   description: 'Gérez votre catalogue YouTube comme un pro',
   icons: {
     icon: '/favicon.png',
-  }
-    ]
-  }
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

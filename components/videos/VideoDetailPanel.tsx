@@ -7,11 +7,19 @@ import toast from 'react-hot-toast'
 
 interface Props { video: Video; onClose: () => void }
 
+const LANGUAGES = [
+  { code: 'fr', label: 'FR', flag: '🇫🇷' },
+  { code: 'en', label: 'EN', flag: '🇬🇧' },
+  { code: 'es', label: 'ES', flag: '🇪🇸' },
+  { code: 'de', label: 'DE', flag: '🇩🇪' },
+]
+
 export default function VideoDetailPanel({ video, onClose }: Props) {
   const [loading, setLoading] = useState<string | null>(null)
   const [aiResult, setAiResult] = useState('')
   const [aiType, setAiType] = useState('')
   const [aiHint, setAiHint] = useState('')
+  const [language, setLanguage] = useState('fr')
 
   async function generate(type: 'titles' | 'description') {
     setLoading(type)
@@ -21,7 +29,7 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
       const res = await fetch('/api/ai/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, videoTitle: video.title, videoDescription: video.description, keywords: (video.tags || []).join(', '), hint: aiHint, count: 5 }),
+        body: JSON.stringify({ type, videoTitle: video.title, videoDescription: video.description, keywords: (video.tags || []).join(', '), hint: aiHint, count: 3, language }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
@@ -35,7 +43,7 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
 
   function copyResult() {
     navigator.clipboard.writeText(aiResult)
-    toast.success('Copie !')
+    toast.success('Copié !')
   }
 
   // Analytics data
@@ -47,117 +55,90 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
   const avgViewSec = video.average_view_duration || 0
   const avgPct = video.average_view_percentage || 0
   const pctColor = avgPct >= 50 ? '#22c55e' : avgPct >= 30 ? '#f97316' : '#ef4444'
-  const gaugeRadius = 45
-  const gaugeCircumference = 2 * Math.PI * gaugeRadius
-  const gaugeOffset = gaugeCircumference - (avgPct / 100) * gaugeCircumference
 
-  const basicMetrics = [
-    { label: 'Vues totales', value: formatNumber(video.view_count) },
+  const retentionRadius = 28
+  const retentionCircumference = 2 * Math.PI * retentionRadius
+  const retentionOffset = retentionCircumference * (1 - avgPct / 100)
+
+  const metricCards = [
+    { label: 'Vues', value: formatNumber(video.view_count), color: 'var(--text-primary)' },
     { label: 'Likes', value: formatNumber(video.like_count) },
     { label: 'Commentaires', value: formatNumber(video.comment_count) },
-    { label: 'Duree', value: formatDuration(video.duration) },
-  ]
-
-  const analyticsMetrics = [
-    { label: 'Duree moy. visionnage', value: formatViewDuration(avgViewSec), sub: totalDurationSec > 0 ? `sur ${formatViewDuration(totalDurationSec)}` : undefined },
-    { label: '% regarde', value: formatPercentage(avgPct), color: pctColor },
-    { label: 'Temps total regarde', value: formatMinutes(video.estimated_minutes_watched) },
-    { label: 'Partages', value: video.shares != null ? formatNumber(video.shares) : '\u2014' },
-    { label: 'Abonnes gagnes', value: video.subscribers_gained != null ? '+' + formatNumber(video.subscribers_gained) : '\u2014', color: '#22c55e' },
-    { label: 'Abonnes perdus', value: video.subscribers_lost != null ? '-' + formatNumber(video.subscribers_lost) : '\u2014', color: '#ef4444' },
+    { label: 'Durée', value: formatDuration(video.duration) },
+    ...(hasAnalytics ? [
+      { label: 'Visionnage moy.', value: formatViewDuration(video.average_view_duration), sub: totalDurationSec > 0 ? `sur ${formatDuration(video.duration)}` : undefined },
+      { label: 'Temps regardé', value: formatMinutes(video.estimated_minutes_watched) },
+      { label: 'Partages', value: formatNumber(video.shares || 0) },
+      { label: 'Abonnés +', value: '+' + formatNumber(video.subscribers_gained || 0), color: '#22c55e' },
+      { label: 'Abonnés -', value: '-' + formatNumber(video.subscribers_lost || 0), color: '#ef4444' },
+    ] : []),
   ]
 
   return (
-    <aside className="w-[360px] min-w-[360px] flex flex-col border-l overflow-hidden animate-slide-in"
+    <aside className="w-[340px] min-w-[340px] border-l flex flex-col h-full overflow-hidden"
       style={{ background: 'var(--bg-secondary)', borderColor: 'var(--bg-border)' }}>
-
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b shrink-0"
-        style={{ borderColor: 'var(--bg-border)' }}>
-        <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>Details</span>
-        <button onClick={onClose} className="w-7 h-7 rounded flex items-center justify-center border transition-all shrink-0"
-          style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-muted)' }}>
-          <X size={13} />
+      <div className="flex items-center justify-between px-4 py-3 border-b shrink-0" style={{ borderColor: 'var(--bg-border)' }}>
+        <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>Détails</span>
+        <button onClick={onClose} className="w-6 h-6 rounded flex items-center justify-center transition-all"
+          style={{ color: 'var(--text-muted)' }}>
+          <X size={14} />
         </button>
       </div>
 
-      {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
-        {/* Thumbnail */}
-        {video.thumbnail_url && (
-          <img src={video.thumbnail_url} alt={video.title} referrerPolicy="no-referrer"
-            className="w-full" style={{ aspectRatio: '16/9', objectFit: 'cover' }} />
-        )}
-
-        {/* Title + ID */}
+        {/* Thumbnail + Title */}
         <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--bg-border)' }}>
-          <p className="text-xs font-semibold leading-snug mb-1" style={{ color: 'var(--text-primary)' }}>{video.title}</p>
-          <p className="font-mono text-[10px]" style={{ color: 'var(--text-muted)' }}>{video.youtube_id} · {formatDate(video.published_at)}</p>
+          {video.thumbnail_url && (
+            <img src={video.thumbnail_url} alt="" className="w-full rounded-lg mb-3" referrerPolicy="no-referrer"
+              style={{ aspectRatio: '16/9', objectFit: 'cover' }} />
+          )}
+          <h3 className="text-sm font-semibold leading-snug mb-1" style={{ color: 'var(--text-primary)' }}>{video.title}</h3>
+          <div className="flex items-center gap-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            <span>{formatDate(video.published_at)}</span>
+            <span>·</span>
+            <span>{video.status}</span>
+            <span>·</span>
+            <a href={`https://youtube.com/watch?v=${video.youtube_id}`} target="_blank" rel="noreferrer"
+              className="underline" style={{ color: 'var(--accent-red)' }}>YouTube</a>
+          </div>
         </div>
 
-        {/* Basic metrics */}
+        {/* Retention gauge */}
+        {hasAnalytics && avgPct > 0 && (
+          <div className="px-4 py-3 border-b flex items-center gap-4" style={{ borderColor: 'var(--bg-border)' }}>
+            <svg width="70" height="70" viewBox="0 0 70 70">
+              <circle cx="35" cy="35" r={retentionRadius} fill="none" stroke="var(--bg-border)" strokeWidth="5" />
+              <circle cx="35" cy="35" r={retentionRadius} fill="none" stroke={pctColor} strokeWidth="5"
+                strokeDasharray={retentionCircumference} strokeDashoffset={retentionOffset}
+                strokeLinecap="round" transform="rotate(-90 35 35)" />
+              <text x="35" y="33" textAnchor="middle" fontSize="13" fontWeight="bold" fill={pctColor}>{avgPct.toFixed(0)}%</text>
+              <text x="35" y="44" textAnchor="middle" fontSize="8" fill="var(--text-muted)">rétention</text>
+            </svg>
+            <div className="flex-1">
+              <div className="text-xs font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
+                {formatViewDuration(avgViewSec)} / {formatDuration(video.duration)}
+              </div>
+              <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-border)' }}>
+                <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(avgPct, 100)}%`, background: pctColor }} />
+              </div>
+              <div className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>Durée moyenne de visionnage</div>
+            </div>
+          </div>
+        )}
+
+        {/* Metric cards */}
         <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--bg-border)' }}>
-          <div className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Metriques</div>
-          <div className="grid grid-cols-2 gap-2">
-            {basicMetrics.map(m => (
-              <div key={m.label} className="rounded-lg p-2.5 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)' }}>
-                <div className="text-[10px] mb-0.5" style={{ color: 'var(--text-muted)' }}>{m.label}</div>
-                <div className="font-mono text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{m.value}</div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {metricCards.map((c, i) => (
+              <div key={i} className="rounded-lg p-2.5 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)' }}>
+                <div className="text-[10px] mb-0.5" style={{ color: 'var(--text-muted)' }}>{c.label}</div>
+                <div className="font-mono text-sm font-semibold" style={{ color: c.color || 'var(--text-primary)' }}>{c.value}</div>
+                {c.sub && <div className="text-[9px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{c.sub}</div>}
               </div>
             ))}
           </div>
         </div>
-
-        {/* Analytics section */}
-        {hasAnalytics && (
-          <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--bg-border)' }}>
-            <div className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--text-muted)' }}>Analytics</div>
-
-            {/* Retention gauge */}
-            <div className="flex flex-col items-center mb-4">
-              <div className="relative" style={{ width: 120, height: 120 }}>
-                <svg width="120" height="120" viewBox="0 0 120 120">
-                  <circle cx="60" cy="60" r={gaugeRadius} fill="none" stroke="var(--bg-border)" strokeWidth="8" />
-                  <circle cx="60" cy="60" r={gaugeRadius} fill="none" stroke={pctColor} strokeWidth="8" strokeLinecap="round"
-                    strokeDasharray={gaugeCircumference} strokeDashoffset={gaugeOffset}
-                    transform="rotate(-90 60 60)" style={{ transition: 'stroke-dashoffset 0.5s ease' }} />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="font-mono text-xl font-bold" style={{ color: pctColor }}>{avgPct.toFixed(1)}%</span>
-                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>regarde</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Duration bar */}
-            {totalDurationSec > 0 && avgViewSec > 0 && (
-              <div className="rounded-lg border p-3 mb-3" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)' }}>
-                <div className="flex justify-between text-[10px] mb-1.5">
-                  <span style={{ color: 'var(--text-muted)' }}>0:00</span>
-                  <span style={{ color: 'var(--text-muted)' }}>{formatViewDuration(totalDurationSec)}</span>
-                </div>
-                <div className="h-3 rounded-full overflow-hidden" style={{ background: 'var(--bg-hover)' }}>
-                  <div className="h-full rounded-full transition-all"
-                    style={{ width: `${Math.min(100, (avgViewSec / totalDurationSec) * 100)}%`, background: `linear-gradient(90deg, ${pctColor}, ${pctColor}88)` }} />
-                </div>
-                <div className="mt-1.5">
-                  <span className="text-[10px] font-medium" style={{ color: pctColor }}>Moy: {formatViewDuration(avgViewSec)}</span>
-                </div>
-              </div>
-            )}
-
-            {/* Analytics metric cards */}
-            <div className="grid grid-cols-2 gap-2">
-              {analyticsMetrics.map(c => (
-                <div key={c.label} className="rounded-lg p-2.5 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)' }}>
-                  <div className="text-[10px] mb-0.5" style={{ color: 'var(--text-muted)' }}>{c.label}</div>
-                  <div className="font-mono text-sm font-semibold" style={{ color: c.color || 'var(--text-primary)' }}>{c.value}</div>
-                  {c.sub && <div className="text-[9px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{c.sub}</div>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Playlists */}
         {video.playlists && video.playlists.length > 0 && (
@@ -178,21 +159,37 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
         <div className="px-4 py-3">
           <div className="text-[10px] font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5" style={{ color: '#a855f7' }}>
             <Sparkles size={11} />
-            Generation IA
+            Génération IA
           </div>
+
+          {/* Language selector */}
+          <div className="flex gap-1 mb-3">
+            {LANGUAGES.map(l => (
+              <button key={l.code} onClick={() => setLanguage(l.code)}
+                className="flex-1 py-1.5 rounded-md text-[11px] font-semibold transition-all border"
+                style={{
+                  background: language === l.code ? 'rgba(168,85,247,0.15)' : 'var(--bg-card)',
+                  borderColor: language === l.code ? 'rgba(168,85,247,0.4)' : 'var(--bg-border)',
+                  color: language === l.code ? '#a855f7' : 'var(--text-secondary)',
+                }}>
+                {l.flag} {l.label}
+              </button>
+            ))}
+          </div>
+
           <div className="flex flex-col gap-2">
             <button onClick={() => generate('titles')} disabled={!!loading}
               className="w-full py-2 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
               style={{ background: 'rgba(168,85,247,0.1)', borderColor: 'rgba(168,85,247,0.25)', color: '#a855f7' }}>
-              {loading === 'titles' ? <><RotateCcw size={11} className="animate-spin" /> Generation...</> : <><Sparkles size={11} /> Generer 5 titres</>}
+              {loading === 'titles' ? <><RotateCcw size={11} className="animate-spin" /> Génération...</> : <><Sparkles size={11} /> Générer 3 titres</>}
             </button>
             <button onClick={() => generate('description')} disabled={!!loading}
               className="w-full py-2 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
               style={{ background: 'rgba(168,85,247,0.1)', borderColor: 'rgba(168,85,247,0.25)', color: '#a855f7' }}>
-              {loading === 'description' ? <><RotateCcw size={11} className="animate-spin" /> Generation...</> : <><Sparkles size={11} /> Generer une description</>}
+              {loading === 'description' ? <><RotateCcw size={11} className="animate-spin" /> Génération...</> : <><Sparkles size={11} /> Générer une description</>}
             </button>
             <textarea value={aiHint} onChange={e => setAiHint(e.target.value)}
-              placeholder="Donner des indications pour la description..."
+              placeholder="Indications supplémentaires (ton, style, mots-clés)..."
               rows={2}
               className="w-full rounded-lg border px-3 py-2 text-xs resize-none outline-none"
               style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-primary)', fontFamily: 'inherit' }}
@@ -201,7 +198,7 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
           {aiResult && (
             <div className="mt-3 rounded-lg border p-3 relative" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)' }}>
               <div className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-                {aiType === 'titles' ? 'Titres generes' : 'Description generee'}
+                {aiType === 'titles' ? 'Titres générés' : 'Description générée'}
               </div>
               <pre className="text-xs whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--text-primary)', fontFamily: 'inherit' }}>{aiResult}</pre>
               <button onClick={copyResult}

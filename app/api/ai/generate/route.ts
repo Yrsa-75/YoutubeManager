@@ -1,30 +1,65 @@
 import { NextRequest, NextResponse } from 'next/server'
-import OpenAI from 'openai'
+
+const LANG_LABELS: Record<string, string> = {
+  fr: 'français',
+  en: 'English',
+  es: 'español',
+  de: 'Deutsch',
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-    const { type, videoTitle, videoDescription, keywords, hint, count = 5 } = await req.json()
+    const { type, videoTitle, videoDescription, keywords, hint, count, language } = await req.json()
 
-    let prompt = ''
-
-    if (type === 'titles') {
-      prompt = 'Tu es un expert en optimisation YouTube. Genere ' + count + ' titres accrocheurs pour une video YouTube.\n\nTitre actuel : "' + videoTitle + '"\nDescription : "' + (videoDescription || '').slice(0, 300) + '"\nMots-cles : ' + keywords + '\n\nRegles :\n- 50-70 caracteres\n- Accrocheurs, sans clickbait agressif\n- Optimises SEO YouTube\n- En francais\n- Format : liste numerotee uniquement'
-    } else {
-      prompt = 'Tu es un expert en optimisation YouTube. Genere une description optimisee.\n\nTitre : "' + videoTitle + '"\nDescription actuelle : "' + (videoDescription || '').slice(0, 500) + '"\nMots-cles : ' + keywords + '\n\nRegles :\n- 150-300 mots\n- 2 premieres lignes accrocheuses\n- Mots-cles integres naturellement\n- En francais' + (hint ? '\n\nIndications supplementaires : ' + hint : '')
+    if (!type || !videoTitle) {
+      return NextResponse.json({ error: 'Missing type or videoTitle' }, { status: 400 })
     }
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 600,
-      temperature: 0.8,
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey) {
+      return NextResponse.json({ error: 'OPENAI_API_KEY not configured' }, { status: 500 })
+    }
+
+    const lang = LANG_LABELS[language] || LANG_LABELS['fr']
+    const titleCount = count || 3
+
+    let systemPrompt: string
+    let userPrompt: string
+
+    if (type === 'titles') {
+      systemPrompt = `You are a YouTube SEO expert. Generate exactly ${titleCount} alternative video titles. Each title must be in ${lang}. Titles should be catchy, optimized for click-through rate, and relevant to the video content. Return only the numbered titles, one per line, no extra commentary.`
+      userPrompt = `Original title: "${videoTitle}"\n${videoDescription ? `Description: "${videoDescription.slice(0, 300)}"` : ''}\n${keywords ? `Keywords: ${keywords}` : ''}\n${hint ? `Additional instructions: ${hint}` : ''}\n\nGenerate ${titleCount} alternative titles in ${lang}.`
+    } else {
+      systemPrompt = `You are a YouTube SEO expert. Write an optimized video description in ${lang}. The description should be engaging, include relevant keywords naturally, and follow YouTube best practices (hook in first 2 lines, structured with sections, include a call to action). Return only the description text, no extra commentary.`
+      userPrompt = `Video title: "${videoTitle}"\n${videoDescription ? `Current description: "${videoDescription.slice(0, 500)}"` : ''}\n${keywords ? `Keywords: ${keywords}` : ''}\n${hint ? `Additional instructions: ${hint}` : ''}\n\nWrite an optimized description in ${lang}.`
+    }
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.8,
+        max_tokens: 1000,
+      }),
     })
 
-    const result = completion.choices[0]?.message?.content || ''
-    return NextResponse.json({ result, type })
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erreur inconnue'
-    return NextResponse.json({ error: msg }, { status: 500 })
+    const data = await response.json()
+    if (!response.ok) {
+      throw new Error(data.error?.message || 'OpenAI API error')
+    }
+
+    const result = data.choices?.[0]?.message?.content?.trim() || ''
+    return NextResponse.json({ result })
+  } catch (error: any) {
+    console.error('AI generate error:', error)
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

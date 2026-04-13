@@ -1,9 +1,10 @@
 'use client'
 import { signOut, useSession } from 'next-auth/react'
-import { Play, Clock, Palette, RefreshCw, LogOut, BarChart2 } from 'lucide-react'
+import { Play, Clock, Palette, RefreshCw, LogOut, BarChart2, Sun, Moon } from 'lucide-react'
 import type { TabType } from '@/types'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
+import { useTheme } from '@/hooks/useTheme'
 
 interface Props {
   activeTab: TabType
@@ -14,6 +15,7 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
   const { data: session } = useSession()
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState<string | null>(null)
+  const { theme, toggleTheme } = useTheme()
 
   async function handleSync() {
     setSyncing(true)
@@ -104,6 +106,14 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
 
       {/* Footer */}
       <div className="p-3 border-t space-y-2" style={{ borderColor: 'var(--bg-border)' }}>
+        {/* Theme toggle */}
+        <button onClick={toggleTheme}
+          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all"
+          style={{ color: 'var(--text-secondary)' }}>
+          {theme === 'dark' ? <Sun size={12} /> : <Moon size={12} />}
+          {theme === 'dark' ? 'Mode clair' : 'Mode sombre'}
+        </button>
+        {/* Sync */}
         <button onClick={handleSync} disabled={syncing}
           className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border text-xs font-medium transition-all"
           style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)' }}>

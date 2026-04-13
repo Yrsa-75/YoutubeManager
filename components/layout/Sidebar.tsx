@@ -53,19 +53,10 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
 
   return (
     <aside className="w-[220px] min-w-[220px] flex flex-col h-screen border-r" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--bg-border)' }}>
-      {/* Project name */}
-      <div className="flex items-center gap-3 px-5 pt-3 pb-1">
-        <img src="/kairos-logo.png" alt="KAIROS" width={40} height={40} style={{ borderRadius: 8 }} />
-        <span className="font-bold uppercase tracking-[0.2em]" style={{ color: 'var(--text-muted)', fontSize: '30px' }}>KAIROS</span>
-      </div>
-      {/* Logo */}
-      <div className="flex items-center gap-2.5 px-5 pb-4 border-b" style={{ borderColor: 'var(--bg-border)' }}>
-        <div className="w-8 h-6 rounded-md flex items-center justify-center" style={{ background: 'var(--accent-red)' }}>
-          <div className="w-0 h-0 border-t-[5px] border-t-transparent border-b-[5px] border-b-transparent border-l-[9px] border-l-white ml-0.5" />
-        </div>
-        <span className="text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
-          Youtube<span style={{ color: 'var(--accent-red)' }}>Manager</span>
-        </span>
+      {/* Logo KAIROS */}
+      <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b" style={{ borderColor: 'var(--bg-border)' }}>
+        <img src="/kairos-logo.png" alt="KAIROS" width={36} height={36} style={{ borderRadius: 6 }} />
+        <span className="font-bold uppercase tracking-[0.15em]" style={{ color: 'var(--text-primary)', fontSize: '22px' }}>KAIROS</span>
       </div>
 
       {/* Channel */}

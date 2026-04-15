@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth/options'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -8,6 +10,12 @@ const supabase = createClient(
 
 export async function GET(req: NextRequest) {
   try {
+    const session = await getServerSession(authOptions)
+    if (!session?.userId) {
+      return NextResponse.json({ videos: [], total: 0, page: 1, limit: 50 })
+    }
+    const userId = session.userId
+
     const { searchParams } = new URL(req.url)
     const search = searchParams.get('search') || ''
     const status = searchParams.get('status') || ''
@@ -20,6 +28,7 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from('videos')
       .select('*', { count: 'exact' })
+      .eq('user_id', userId)
 
     if (search) {
       query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%,youtube_id.ilike.%${search}%`)
@@ -29,17 +38,22 @@ export async function GET(req: NextRequest) {
     query = query.order(sortBy, { ascending: sortDir === 'asc' })
     query = query.range(offset, offset + limit - 1)
 
-    const { data: videos, count, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { data: videos, error, count } = await query
 
-    // Join playlists for each video
-    let videosWithPlaylists = videos || []
-    if (videosWithPlaylists.length > 0) {
-      const youtubeIds = videosWithPlaylists.map(v => v.youtube_id)
+    if (error) {
+      console.error('Videos fetch error:', error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    // Fetch playlist associations
+    let videosWithPlaylists
+    if (videos && videos.length > 0) {
+      const youtubeIds = videos.map(v => v.youtube_id)
 
       const { data: associations } = await supabase
         .from('video_playlists')
         .select('youtube_id, playlist_id')
+        .eq('user_id', userId)
         .in('youtube_id', youtubeIds)
 
       if (associations && associations.length > 0) {
@@ -60,13 +74,15 @@ export async function GET(req: NextRequest) {
           })
         }
 
-        videosWithPlaylists = videosWithPlaylists.map(v => ({
+        videosWithPlaylists = videos.map(v => ({
           ...v,
           playlists: videoPlaylistsMap.get(v.youtube_id) || [],
         }))
       } else {
-        videosWithPlaylists = videosWithPlaylists.map(v => ({ ...v, playlists: [] }))
+        videosWithPlaylists = videos.map(v => ({ ...v, playlists: [] }))
       }
+    } else {
+      videosWithPlaylists = []
     }
 
     return NextResponse.json({
@@ -76,6 +92,7 @@ export async function GET(req: NextRequest) {
       limit,
     })
   } catch (error: any) {
+    console.error('Videos API error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

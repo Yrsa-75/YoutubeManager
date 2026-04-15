@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const search = searchParams.get('search') || ''
     const status = searchParams.get('status') || ''
+    const channelIds = searchParams.get('channelIds') || ''
     const sortBy = searchParams.get('sortBy') || 'published_at'
     const sortDir = searchParams.get('sortDir') || 'desc'
     const page = parseInt(searchParams.get('page') || '1')
@@ -29,6 +30,12 @@ export async function GET(req: NextRequest) {
       .from('videos')
       .select('*', { count: 'exact' })
       .eq('user_id', userId)
+
+    // Filter by selected channels
+    if (channelIds) {
+      const ids = channelIds.split(',').filter(Boolean)
+      if (ids.length > 0) query = query.in('channel_id', ids)
+    }
 
     if (search) {
       query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%,youtube_id.ilike.%${search}%`)
@@ -45,8 +52,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
+    // Get channel info for these videos
+    const { data: channels } = await supabase
+      .from('channels')
+      .select('channel_id, title, thumbnail_url')
+      .eq('user_id', userId)
+    const channelMap = new Map((channels || []).map(c => [c.channel_id, { title: c.title, thumbnail_url: c.thumbnail_url }]))
+
     // Fetch playlist associations
-    let videosWithPlaylists
+    let videosWithExtras
     if (videos && videos.length > 0) {
       const youtubeIds = videos.map(v => v.youtube_id)
 
@@ -56,16 +70,15 @@ export async function GET(req: NextRequest) {
         .eq('user_id', userId)
         .in('youtube_id', youtubeIds)
 
+      let videoPlaylistsMap = new Map<string, { playlist_id: string; title: string }[]>()
       if (associations && associations.length > 0) {
         const playlistIds = [...new Set(associations.map(a => a.playlist_id))]
         const { data: playlists } = await supabase
           .from('playlists')
           .select('playlist_id, title')
           .in('playlist_id', playlistIds)
-
         const playlistMap = new Map((playlists || []).map(p => [p.playlist_id, p.title]))
 
-        const videoPlaylistsMap = new Map<string, { playlist_id: string; title: string }[]>()
         for (const a of associations) {
           if (!videoPlaylistsMap.has(a.youtube_id)) videoPlaylistsMap.set(a.youtube_id, [])
           videoPlaylistsMap.get(a.youtube_id)!.push({
@@ -73,20 +86,20 @@ export async function GET(req: NextRequest) {
             title: playlistMap.get(a.playlist_id) || a.playlist_id,
           })
         }
-
-        videosWithPlaylists = videos.map(v => ({
-          ...v,
-          playlists: videoPlaylistsMap.get(v.youtube_id) || [],
-        }))
-      } else {
-        videosWithPlaylists = videos.map(v => ({ ...v, playlists: [] }))
       }
+
+      videosWithExtras = videos.map(v => ({
+        ...v,
+        channel_title: channelMap.get(v.channel_id)?.title || '',
+        channel_thumbnail: channelMap.get(v.channel_id)?.thumbnail_url || '',
+        playlists: videoPlaylistsMap.get(v.youtube_id) || [],
+      }))
     } else {
-      videosWithPlaylists = []
+      videosWithExtras = []
     }
 
     return NextResponse.json({
-      videos: videosWithPlaylists,
+      videos: videosWithExtras,
       total: count || 0,
       page,
       limit,

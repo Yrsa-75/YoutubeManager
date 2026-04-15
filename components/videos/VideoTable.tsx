@@ -72,6 +72,12 @@ export default function VideoTable({ searchQuery }: Props) {
   }, [])
 
   useEffect(() => {
+    const h = () => fetchVideos()
+    window.addEventListener('refresh-videos', h)
+    return () => window.removeEventListener('refresh-videos', h)
+  }, [])
+
+  useEffect(() => {
     fetchVideos()
     fetchColorRules()
   }, [searchQuery, sortBy, sortDir, statusFilter])

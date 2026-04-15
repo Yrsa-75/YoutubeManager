@@ -31,10 +31,20 @@ export async function GET(req: NextRequest) {
       .select('*', { count: 'exact' })
       .eq('user_id', userId)
 
-    // Filter by selected channels
+    // Auto-filter by selected channels
     if (channelIds) {
       const ids = channelIds.split(',').filter(Boolean)
       if (ids.length > 0) query = query.in('channel_id', ids)
+    } else {
+      // Auto-filter: only show videos from selected channels
+      const { data: selChannels } = await supabase
+        .from('channels')
+        .select('channel_id')
+        .eq('user_id', userId)
+        .eq('is_selected', true)
+      if (selChannels && selChannels.length > 0) {
+        query = query.in('channel_id', selChannels.map(c => c.channel_id))
+      }
     }
 
     if (search) {

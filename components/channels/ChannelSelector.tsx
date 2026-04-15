@@ -45,7 +45,7 @@ export default function ChannelSelector() {
       setChannels(prev => [...prev, { ...data.channel, is_selected: true }])
       setUrl('')
       setShowAdd(false)
-      toast.success(data.channel.title + ' ajout\u00e9e !')
+      toast.success(data.channel.title + ' ajoutée !')
     } catch (e: any) {
       toast.error(e.message)
     } finally {
@@ -59,7 +59,7 @@ export default function ChannelSelector() {
         <button onClick={() => setShowAdd(true)}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all"
           style={{ color: 'var(--text-muted)', background: 'var(--bg-hover)' }}>
-          <Plus size={14} /> Ajouter une cha\u00eene
+          <Plus size={14} /> Ajouter une chaîne
         </button>
       </div>
     )
@@ -69,7 +69,7 @@ export default function ChannelSelector() {
     <div style={{ padding: '8px 0', borderTop: '1px solid var(--bg-border)' }}>
       <div className="flex items-center justify-between px-2 mb-2">
         <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-          Cha\u00eenes
+          Chaînes
         </span>
         <button onClick={() => setShowAdd(!showAdd)} className="p-1 rounded transition-all hover:opacity-80"
           style={{ color: 'var(--text-muted)' }}>

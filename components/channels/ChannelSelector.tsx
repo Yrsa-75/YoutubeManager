@@ -28,6 +28,7 @@ export default function ChannelSelector() {
       body: JSON.stringify({ channelId, isSelected }),
     })
     setChannels(prev => prev.map(c => c.channel_id === channelId ? { ...c, is_selected: isSelected } : c))
+    window.dispatchEvent(new Event('refresh-videos'))
   }
 
   async function addChannel() {

@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth/options'
 export async function GET() {
   const session = await getServerSession(authOptions)
   if (!session?.userId) {
-    return NextResponse.redirect(new URL('/dashboard', process.env.NEXTAUTH_URL!))
+    return NextResponse.redirect(new URL('/dashboard', process.env.NEXTAUTH_URL || 'http://localhost:3000'))
   }
 
   const params = new URLSearchParams({
@@ -17,7 +17,7 @@ export async function GET() {
       'https://www.googleapis.com/auth/yt-analytics.readonly',
     ].join(' '),
     access_type: 'offline',
-    prompt: 'select_account consent',
+    prompt: 'select_account',
     state: session.userId,
   })
 

@@ -5,275 +5,211 @@ import { createClient } from '@supabase/supabase-js'
 
 export const maxDuration = 60
 
+async function refreshChannelToken(channel: any, supabase: any) {
+  if (!channel.refresh_token) return channel.access_token
+  if (channel.token_expires_at && channel.token_expires_at - Math.floor(Date.now() / 1000) > 300) {
+    return channel.access_token
+  }
+  try {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID!,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+        grant_type: 'refresh_token',
+        refresh_token: channel.refresh_token,
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) return channel.access_token
+    await supabase.from('channels').update({
+      access_token: data.access_token,
+      token_expires_at: Math.floor(Date.now() / 1000) + data.expires_in,
+      refresh_token: data.refresh_token || channel.refresh_token,
+    }).eq('channel_id', channel.channel_id).eq('user_id', channel.user_id)
+    return data.access_token
+  } catch { return channel.access_token }
+}
+
 export async function POST() {
   const results: { videos: number; analytics: number; playlists: number; associations: number; channels: number; errors: string[] } = {
     videos: 0, analytics: 0, playlists: 0, associations: 0, channels: 0, errors: [],
   }
-
   try {
     const session = await getServerSession(authOptions)
     if (!session?.accessToken || !session?.userId) {
       return NextResponse.json({ error: 'No access token' }, { status: 401 })
     }
-
-    const token = session.accessToken
+    const sessionToken = session.accessToken
     const userId = session.userId
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    )
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-    // === SYNC CHANNELS LIST ===
+    // Sync main channel from session
     try {
-      const allChannels: any[] = []
-      const mineRes = await fetch(
-        'https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&mine=true',
-        { headers: { Authorization: `Bearer ${token}` } }
-      )
+      const mineRes = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true', { headers: { Authorization: `Bearer ${sessionToken}` } })
       const mineData = await mineRes.json()
-      if (mineRes.ok && mineData.items) allChannels.push(...mineData.items)
-
-      const managedRes = await fetch(
-        'https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&managedByMe=true&maxResults=50',
-        { headers: { Authorization: `Bearer ${token}` } }
-      )
-      const managedData = await managedRes.json()
-      if (managedRes.ok && managedData.items) {
-        const ids = new Set(allChannels.map((c: any) => c.id))
-        for (const ch of managedData.items) {
-          if (!ids.has(ch.id)) allChannels.push(ch)
-        }
-      }
-
-      const { data: existing } = await supabase
-        .from('channels').select('channel_id, is_selected').eq('user_id', userId)
-      const selMap = new Map((existing || []).map(c => [c.channel_id, c.is_selected]))
-
-      if (allChannels.length > 0) {
-        const toInsert = allChannels.map((ch: any) => ({
-          user_id: userId,
-          channel_id: ch.id,
-          title: ch.snippet?.title,
+      if (mineRes.ok && mineData.items?.length > 0) {
+        const ch = mineData.items[0]
+        const { data: ex } = await supabase.from('channels').select('is_selected').eq('user_id', userId).eq('channel_id', ch.id).single()
+        await supabase.from('channels').upsert({
+          user_id: userId, channel_id: ch.id, title: ch.snippet?.title,
           thumbnail_url: ch.snippet?.thumbnails?.default?.url,
           subscriber_count: parseInt(ch.statistics?.subscriberCount || '0'),
           video_count: parseInt(ch.statistics?.videoCount || '0'),
-          is_selected: selMap.has(ch.id) ? selMap.get(ch.id) : true,
+          is_selected: ex?.is_selected ?? true, access_token: sessionToken,
           synced_at: new Date().toISOString(),
-        }))
-        await supabase.from('channels').upsert(toInsert, { onConflict: 'user_id,channel_id', ignoreDuplicates: false })
-        results.channels = toInsert.length
+        }, { onConflict: 'user_id,channel_id', ignoreDuplicates: false })
       }
-    } catch (e: any) {
-      results.errors.push('Channels: ' + e.message)
-    }
+    } catch (e: any) { results.errors.push('Main channel: ' + e.message) }
 
-    // Get selected channels
-    const { data: selectedChannels } = await supabase
-      .from('channels').select('channel_id, title').eq('user_id', userId).eq('is_selected', true)
-
+    // Get selected channels with tokens
+    const { data: selectedChannels } = await supabase.from('channels')
+      .select('channel_id, title, user_id, access_token, refresh_token, token_expires_at')
+      .eq('user_id', userId).eq('is_selected', true)
     if (!selectedChannels || selectedChannels.length === 0) {
-      results.errors.push('Aucune chaîne sélectionnée')
+      results.errors.push('Aucune cha\u00eene s\u00e9lectionn\u00e9e')
       return NextResponse.json(results)
     }
+    results.channels = selectedChannels.length
 
-    // === FOR EACH SELECTED CHANNEL ===
     for (const channel of selectedChannels) {
       const chId = channel.channel_id
       const chName = channel.title || chId
+      let token = channel.access_token || sessionToken
+      if (channel.refresh_token) { token = await refreshChannelToken(channel, supabase) }
 
-      // STEP 1: Sync videos
+      // STEP 1: Videos
       try {
-        const channelRes = await fetch(
-          `https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${chId}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        )
-        const channelData = await channelRes.json()
-        if (!channelRes.ok) throw new Error(channelData.error?.message || 'Failed to get channel')
-
-        const uploadsPlaylistId = channelData.items?.[0]?.contentDetails?.relatedPlaylists?.uploads
-        if (!uploadsPlaylistId) throw new Error('No uploads playlist for ' + chName)
-
-        let allVideoIds: string[] = []
-        let nextPageToken: string | undefined
+        const cr = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${chId}`, { headers: { Authorization: `Bearer ${token}` } })
+        const cd = await cr.json()
+        if (!cr.ok) throw new Error(cd.error?.message || 'Failed to get channel')
+        const uplId = cd.items?.[0]?.contentDetails?.relatedPlaylists?.uploads
+        if (!uplId) throw new Error('No uploads playlist for ' + chName)
+        let allIds: string[] = []; let npt: string | undefined
         do {
-          const plUrl = new URL('https://www.googleapis.com/youtube/v3/playlistItems')
-          plUrl.searchParams.set('part', 'contentDetails')
-          plUrl.searchParams.set('playlistId', uploadsPlaylistId)
-          plUrl.searchParams.set('maxResults', '50')
-          if (nextPageToken) plUrl.searchParams.set('pageToken', nextPageToken)
-          const plRes = await fetch(plUrl.toString(), { headers: { Authorization: `Bearer ${token}` } })
-          const plData = await plRes.json()
-          if (!plRes.ok) throw new Error(plData.error?.message || 'Failed to list playlist items')
-          const ids = (plData.items || []).map((item: any) => item.contentDetails?.videoId).filter(Boolean)
-          allVideoIds = allVideoIds.concat(ids)
-          nextPageToken = plData.nextPageToken
-        } while (nextPageToken)
-
-        if (allVideoIds.length > 0) {
-          const allVideos: any[] = []
-          for (let i = 0; i < allVideoIds.length; i += 50) {
-            const batch = allVideoIds.slice(i, i + 50)
-            const vUrl = new URL('https://www.googleapis.com/youtube/v3/videos')
-            vUrl.searchParams.set('part', 'snippet,contentDetails,statistics,status')
-            vUrl.searchParams.set('id', batch.join(','))
-            const vRes = await fetch(vUrl.toString(), { headers: { Authorization: `Bearer ${token}` } })
-            const vData = await vRes.json()
-            if (!vRes.ok) throw new Error(vData.error?.message || 'Failed to get video details')
-            allVideos.push(...(vData.items || []))
+          const u = new URL('https://www.googleapis.com/youtube/v3/playlistItems')
+          u.searchParams.set('part', 'contentDetails'); u.searchParams.set('playlistId', uplId); u.searchParams.set('maxResults', '50')
+          if (npt) u.searchParams.set('pageToken', npt)
+          const r = await fetch(u.toString(), { headers: { Authorization: `Bearer ${token}` } })
+          const d = await r.json()
+          if (!r.ok) throw new Error(d.error?.message || 'Failed to list items')
+          allIds = allIds.concat((d.items || []).map((i: any) => i.contentDetails?.videoId).filter(Boolean))
+          npt = d.nextPageToken
+        } while (npt)
+        if (allIds.length > 0) {
+          const allVids: any[] = []
+          for (let i = 0; i < allIds.length; i += 50) {
+            const b = allIds.slice(i, i + 50)
+            const u = new URL('https://www.googleapis.com/youtube/v3/videos')
+            u.searchParams.set('part', 'snippet,contentDetails,statistics,status'); u.searchParams.set('id', b.join(','))
+            const r = await fetch(u.toString(), { headers: { Authorization: `Bearer ${token}` } })
+            const d = await r.json()
+            if (!r.ok) throw new Error(d.error?.message || 'Video details error')
+            allVids.push(...(d.items || []))
           }
-
-          const videosToInsert = allVideos.map((video: any) => ({
-            user_id: userId, channel_id: chId, youtube_id: video.id,
-            title: video.snippet?.title, description: video.snippet?.description,
-            thumbnail_url: video.snippet?.thumbnails?.medium?.url,
-            published_at: video.snippet?.publishedAt, status: video.status?.privacyStatus,
-            duration: video.contentDetails?.duration, tags: video.snippet?.tags || [],
-            category_id: video.snippet?.categoryId,
-            view_count: parseInt(video.statistics?.viewCount || '0'),
-            like_count: parseInt(video.statistics?.likeCount || '0'),
-            comment_count: parseInt(video.statistics?.commentCount || '0'),
+          const ins = allVids.map((v: any) => ({
+            user_id: userId, channel_id: chId, youtube_id: v.id, title: v.snippet?.title,
+            description: v.snippet?.description, thumbnail_url: v.snippet?.thumbnails?.medium?.url,
+            published_at: v.snippet?.publishedAt, status: v.status?.privacyStatus,
+            duration: v.contentDetails?.duration, tags: v.snippet?.tags || [],
+            category_id: v.snippet?.categoryId, view_count: parseInt(v.statistics?.viewCount || '0'),
+            like_count: parseInt(v.statistics?.likeCount || '0'), comment_count: parseInt(v.statistics?.commentCount || '0'),
             synced_at: new Date().toISOString(),
           }))
-
-          for (let i = 0; i < videosToInsert.length; i += 500) {
-            const batch = videosToInsert.slice(i, i + 500)
-            const { error } = await supabase.from('videos')
-              .upsert(batch, { onConflict: 'user_id,channel_id,youtube_id', ignoreDuplicates: falselse })
+          for (let i = 0; i < ins.length; i += 500) {
+            const { error } = await supabase.from('videos').upsert(ins.slice(i, i + 500), { onConflict: 'user_id,channel_id,youtube_id', ignoreDuplicates: false })
             if (error) throw error
           }
-          results.videos += videosToInsert.length
+          results.videos += ins.length
         }
-      } catch (e: any) {
-        console.error(`Video sync error [${chName}]:`, e)
-        results.errors.push(`Vidéos (${chName}): ${e.message}`)
-      }
+      } catch (e: any) { results.errors.push(`Videos (${chName}): ${e.message}`) }
 
-      // STEP 2: Sync analytics
+      // STEP 2: Analytics
       try {
-        const { data: videos } = await supabase.from('videos')
-          .select('youtube_id, published_at').eq('user_id', userId).eq('channel_id', chId)
-          .order('published_at', { ascending: true })
-
-        if (videos && videos.length > 0) {
-          const oldestDate = videos[0]?.published_at
-            ? new Date(videos[0].published_at).toISOString().split('T')[0] : '2005-01-01'
+        const { data: vids } = await supabase.from('videos').select('youtube_id, published_at')
+          .eq('user_id', userId).eq('channel_id', chId).order('published_at', { ascending: true })
+        if (vids && vids.length > 0) {
+          const oldest = vids[0]?.published_at ? new Date(vids[0].published_at).toISOString().split('T')[0] : '2005-01-01'
           const today = new Date().toISOString().split('T')[0]
-
-          const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
-          url.searchParams.set('ids', `channel==${chId}`)
-          url.searchParams.set('startDate', oldestDate)
-          url.searchParams.set('endDate', today)
-          url.searchParams.set('dimensions', 'video')
-          url.searchParams.set('metrics', 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares')
-          url.searchParams.set('maxResults', '500')
-          url.searchParams.set('sort', '-estimatedMinutesWatched')
-
-          const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
-          const data = await res.json()
-          if (!res.ok) throw new Error(data.error?.message || 'Analytics API error')
-
-          if (data.rows && data.rows.length > 0) {
-            const updates = data.rows.map((row: any[]) => ({
+          const u = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
+          u.searchParams.set('ids', `channel==${chId}`); u.searchParams.set('startDate', oldest)
+          u.searchParams.set('endDate', today); u.searchParams.set('dimensions', 'video')
+          u.searchParams.set('metrics', 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares')
+          u.searchParams.set('maxResults', '500'); u.searchParams.set('sort', '-estimatedMinutesWatched')
+          const r = await fetch(u.toString(), { headers: { Authorization: `Bearer ${token}` } })
+          const d = await r.json()
+          if (!r.ok) throw new Error(d.error?.message || 'Analytics error')
+          if (d.rows?.length > 0) {
+            const ups = d.rows.map((row: any[]) => ({
               user_id: userId, channel_id: chId, youtube_id: row[0],
               estimated_minutes_watched: row[1] || 0, average_view_duration: row[2] || 0,
               average_view_percentage: row[3] || 0, subscribers_gained: row[4] || 0,
               subscribers_lost: row[5] || 0, shares: row[6] || 0,
               analytics_synced_at: new Date().toISOString(),
             }))
-            for (let i = 0; i < updates.length; i += 500) {
-              const batch = updates.slice(i, i + 500)
-              const { error } = await supabase.from('videos')
-                .upsert(batch, { onConflict: 'user_id,channel_id,youtube_id', ignoreDuplicates: false })
+            for (let i = 0; i < ups.length; i += 500) {
+              const { error } = await supabase.from('videos').upsert(ups.slice(i, i + 500), { onConflict: 'user_id,channel_id,youtube_id', ignoreDuplicates: false })
               if (error) throw error
             }
-            results.analytics += updates.length
+            results.analytics += ups.length
           }
         }
-      } catch (e: any) {
-        console.error(`Analytics sync error [${chName}]:`, e)
-        results.errors.push(`Analytics (${chName}): ${e.message}`)
-      }
+      } catch (e: any) { results.errors.push(`Analytics (${chName}): ${e.message}`) }
 
-      // STEP 3: Sync playlists
+      // STEP 3: Playlists
       try {
-        let allPlaylists: any[] = []
-        let nextPageToken: string | undefined
+        let allPl: any[] = []; let npt2: string | undefined
         do {
-          const plUrl = new URL('https://www.googleapis.com/youtube/v3/playlists')
-          plUrl.searchParams.set('part', 'snippet,contentDetails')
-          plUrl.searchParams.set('channelId', chId)
-          plUrl.searchParams.set('maxResults', '50')
-          if (nextPageToken) plUrl.searchParams.set('pageToken', nextPageToken)
-          const plRes = await fetch(plUrl.toString(), { headers: { Authorization: `Bearer ${token}` } })
-          const plData = await plRes.json()
-          if (!plRes.ok) throw new Error(plData.error?.message || 'Failed to list playlists')
-          allPlaylists = allPlaylists.concat(plData.items || [])
-          nextPageToken = plData.nextPageToken
-        } while (nextPageToken)
-
-        if (allPlaylists.length > 0) {
-          const playlistsToInsert = allPlaylists.map((pl: any) => ({
-            user_id: userId, channel_id: chId, playlist_id: pl.id,
-            title: pl.snippet?.title, description: pl.snippet?.description,
-            thumbnail_url: pl.snippet?.thumbnails?.medium?.url,
-            video_count: pl.contentDetails?.itemCount || 0,
-            published_at: pl.snippet?.publishedAt, synced_at: new Date().toISOString(),
+          const u = new URL('https://www.googleapis.com/youtube/v3/playlists')
+          u.searchParams.set('part', 'snippet,contentDetails'); u.searchParams.set('channelId', chId); u.searchParams.set('maxResults', '50')
+          if (npt2) u.searchParams.set('pageToken', npt2)
+          const r = await fetch(u.toString(), { headers: { Authorization: `Bearer ${token}` } })
+          const d = await r.json()
+          if (!r.ok) throw new Error(d.error?.message || 'Playlists error')
+          allPl = allPl.concat(d.items || []); npt2 = d.nextPageToken
+        } while (npt2)
+        if (allPl.length > 0) {
+          const pli = allPl.map((p: any) => ({
+            user_id: userId, channel_id: chId, playlist_id: p.id, title: p.snippet?.title,
+            description: p.snippet?.description, thumbnail_url: p.snippet?.thumbnails?.medium?.url,
+            video_count: p.contentDetails?.itemCount || 0, published_at: p.snippet?.publishedAt,
+            synced_at: new Date().toISOString(),
           }))
-          const { error } = await supabase.from('playlists')
-            .upsert(playlistsToInsert, { onConflict: 'user_id,playlist_id', ignoreDuplicates: false })
-          if (error) throw error
-          results.playlists += playlistsToInsert.length
-
-          // Rebuild associations
+          await supabase.from('playlists').upsert(pli, { onConflict: 'user_id,playlist_id', ignoreDuplicates: false })
+          results.playlists += pli.length
           await supabase.from('video_playlists').delete().eq('user_id', userId).eq('channel_id', chId)
-          const allAssociations: any[] = []
-          for (const pl of allPlaylists) {
-            let pageToken: string | undefined
-            let position = 0
+          const assocs: any[] = []
+          for (const pl of allPl) {
+            let pt: string | undefined; let pos = 0
             do {
-              const itemUrl = new URL('https://www.googleapis.com/youtube/v3/playlistItems')
-              itemUrl.searchParams.set('part', 'contentDetails')
-              itemUrl.searchParams.set('playlistId', pl.id)
-              itemUrl.searchParams.set('maxResults', '50')
-              if (pageToken) itemUrl.searchParams.set('pageToken', pageToken)
-              const itemRes = await fetch(itemUrl.toString(), { headers: { Authorization: `Bearer ${token}` } })
-              const itemData = await itemRes.json()
-              if (!itemRes.ok) break
-              for (const item of itemData.items || []) {
-                const videoId = item.contentDetails?.videoId
-                if (videoId) {
-                  allAssociations.push({ user_id: userId, channel_id: chId, youtube_id: videoId, playlist_id: pl.id, position: position++ })
-                }
-              }
-              pageToken = itemData.nextPageToken
-            } while (pageToken)
+              const iu = new URL('https://www.googleapis.com/youtube/v3/playlistItems')
+              iu.searchParams.set('part', 'contentDetails'); iu.searchParams.set('playlistId', pl.id); iu.searchParams.set('maxResults', '50')
+              if (pt) iu.searchParams.set('pageToken', pt)
+              const ir = await fetch(iu.toString(), { headers: { Authorization: `Bearer ${token}` } })
+              const idata = await ir.json(); if (!ir.ok) break
+              for (const it of idata.items || []) { if (it.contentDetails?.videoId) assocs.push({ user_id: userId, channel_id: chId, youtube_id: it.contentDetails.videoId, playlist_id: pl.id, position: pos++ }) }
+              pt = idata.nextPageToken
+            } while (pt)
           }
-          if (allAssociations.length > 0) {
-            for (let i = 0; i < allAssociations.length; i += 500) {
-              const batch = allAssociations.slice(i, i + 500)
-              await supabase.from('video_playlists')
-                .upsert(batch, { onConflict: 'user_id,youtube_id,playlist_id', ignoreDuplicates: false })
+          if (assocs.length > 0) {
+            for (let i = 0; i < assocs.length; i += 500) {
+              await supabase.from('video_playlists').upsert(assocs.slice(i, i + 500), { onConflict: 'user_id,youtube_id,playlist_id', ignoreDuplicates: false })
             }
-            results.associations += allAssociations.length
+            results.associations += assocs.length
           }
         }
-      } catch (e: any) {
-        console.error(`Playlists sync error [${chName}]:`, e)
-        results.errors.push(`Playlists (${chName}): ${e.message}`)
-      }
+      } catch (e: any) { results.errors.push(`Playlists (${chName}): ${e.message}`) }
     }
 
-    // Log sync
     await supabase.from('sync_logs').insert({
       user_id: userId, videos_synced: results.videos,
       status: results.errors.length > 0 ? 'partial' : 'success',
       error_message: results.errors.length > 0 ? results.errors.join('; ') : null,
       synced_at: new Date().toISOString(),
     })
-
     return NextResponse.json(results)
   } catch (error: any) {
-    console.error('Sync-all error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

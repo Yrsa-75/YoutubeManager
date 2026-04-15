@@ -7,7 +7,8 @@ export async function GET(req: NextRequest) {
   const userId = searchParams.get('state')
   const error = searchParams.get('error')
 
-  const dashboardUrl = new URL('/dashboard', process.env.NEXTAUTH_URL || 'http://localhost:3000')
+  const baseUrl = (process.env.NEXTAUTH_URL || 'http://localhost:3000').replace(/\/$/, '')
+  const dashboardUrl = new URL('/dashboard', baseUrl)
 
   if (error || !code || !userId) {
     dashboardUrl.searchParams.set('channel_error', error || 'missing_code')
@@ -20,7 +21,6 @@ export async function GET(req: NextRequest) {
   )
 
   try {
-    // Exchange code for tokens
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
         code,
         client_id: process.env.GOOGLE_CLIENT_ID!,
         client_secret: process.env.GOOGLE_CLIENT_SECRET!,
-        redirect_uri: `${process.env.NEXTAUTH_URL}/api/youtube/connect-channel/callback`,
+        redirect_uri: `${baseUrl}/api/youtube/connect-channel/callback`,
         grant_type: 'authorization_code',
       }),
     })
@@ -44,7 +44,6 @@ export async function GET(req: NextRequest) {
     const refreshToken = tokenData.refresh_token
     const expiresAt = Math.floor(Date.now() / 1000) + tokenData.expires_in
 
-    // Get the channel info for this Brand Account
     const channelRes = await fetch(
       'https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true',
       { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -59,7 +58,6 @@ export async function GET(req: NextRequest) {
 
     const ch = channelData.items[0]
 
-    // Upsert channel with its own tokens
     const { error: upsertError } = await supabase.from('channels').upsert({
       user_id: userId,
       channel_id: ch.id,

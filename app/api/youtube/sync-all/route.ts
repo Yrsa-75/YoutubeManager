@@ -68,7 +68,7 @@ export async function POST() {
       .select('channel_id, title, user_id, access_token, refresh_token, token_expires_at')
       .eq('user_id', userId).eq('is_selected', true)
     if (!selectedChannels || selectedChannels.length === 0) {
-      results.errors.push('Aucune cha\u00eene s\u00e9lectionn\u00e9e')
+      results.errors.push('Aucune chaîne sélectionnée')
       return NextResponse.json(results)
     }
     results.channels = selectedChannels.length

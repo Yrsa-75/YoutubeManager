@@ -8,9 +8,11 @@ export async function GET() {
     return NextResponse.redirect(new URL('/dashboard', process.env.NEXTAUTH_URL || 'http://localhost:3000'))
   }
 
+  const baseUrl = (process.env.NEXTAUTH_URL || 'http://localhost:3000').replace(/\/$/, '')
+
   const params = new URLSearchParams({
     client_id: process.env.GOOGLE_CLIENT_ID!,
-    redirect_uri: `${process.env.NEXTAUTH_URL}/api/youtube/connect-channel/callback`,
+    redirect_uri: `${baseUrl}/api/youtube/connect-channel/callback`,
     response_type: 'code',
     scope: [
       'https://www.googleapis.com/auth/youtube.readonly',

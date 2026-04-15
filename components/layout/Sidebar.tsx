@@ -5,6 +5,7 @@ import type { TabType } from '@/types'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
 import { useTheme } from '@/hooks/useTheme'
+import ChannelSelector from '@/components/channels/ChannelSelector'
 
 interface Props {
   activeTab: TabType
@@ -117,7 +118,8 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
           <LogOut size={12} />
           Déconnexion
         </button>
-      </div>
+            <ChannelSelector />
+</div>
     </aside>
   )
 }

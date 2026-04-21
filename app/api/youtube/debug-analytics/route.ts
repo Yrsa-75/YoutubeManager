@@ -4,136 +4,98 @@ import { authOptions } from '@/lib/auth/options'
 
 export const maxDuration = 60
 
-// Route de diagnostic : teste plusieurs variantes de requête YouTube Analytics
-// et retourne un rapport détaillé pour comprendre ce qui fonctionne.
-// GET /api/youtube/debug-analytics
 export async function GET() {
   try {
     const session = await getServerSession(authOptions)
-    if (!session?.accessToken) {
-      return NextResponse.json({ error: 'No access token' }, { status: 401 })
-    }
+    if (!session?.accessToken) return NextResponse.json({ error: 'No access token' }, { status: 401 })
     const token = session.accessToken
 
-    // Récupérer l'info de la chaîne principale
-    const chRes = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    // Info chaîne
+    const chRes = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&mine=true', { headers: { Authorization: `Bearer ${token}` } })
     const chData = await chRes.json()
-    if (!chRes.ok) {
-      return NextResponse.json({ step: 'get_channel', error: chData }, { status: 500 })
-    }
+    if (!chRes.ok) return NextResponse.json({ step: 'get_channel', error: chData }, { status: 500 })
     const channel = chData.items?.[0]
-    if (!channel) {
-      return NextResponse.json({ error: 'No channel found for this account' }, { status: 404 })
-    }
+    if (!channel) return NextResponse.json({ error: 'No channel' }, { status: 404 })
     const channelId = channel.id
 
-    // Plage de dates : 30 derniers jours (plus conservateur que depuis 2013)
-    const today = new Date()
-    const startDate30 = new Date(today.getTime() - 30 * 86400000).toISOString().split('T')[0]
-    const startDate7 = new Date(today.getTime() - 7 * 86400000).toISOString().split('T')[0]
-    const todayStr = today.toISOString().split('T')[0]
+    // Récupérer les IDs de vidéos (uploads playlist)
+    const uploadsId = channel.contentDetails?.relatedPlaylists?.uploads
+    const plRes = await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&playlistId=${uploadsId}&maxResults=3`, { headers: { Authorization: `Bearer ${token}` } })
+    const plData = await plRes.json()
+    const videoIds = (plData.items || []).map((i) => i.contentDetails?.videoId).filter(Boolean)
 
-    async function testQuery(label: string, params: Record<string, string>) {
+    const today = new Date().toISOString().split('T')[0]
+    const startDate30 = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
+    const startDate365 = new Date(Date.now() - 365 * 86400000).toISOString().split('T')[0]
+    const startDateAll = '2013-01-01'
+
+    async function testQuery(label, params) {
       const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
       for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
       try {
         const r = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
         const d = await r.json()
-        return {
-          label,
-          status: r.status,
-          ok: r.ok,
-          params,
-          response: r.ok
-            ? { rowCount: d.rows?.length || 0, columnHeaders: d.columnHeaders, firstRow: d.rows?.[0] }
-            : d,
-        }
-      } catch (e: any) {
+        return { label, status: r.status, ok: r.ok, params, response: r.ok ? { rowCount: d.rows?.length || 0, columnHeaders: d.columnHeaders, allRows: d.rows } : d }
+      } catch (e) {
         return { label, status: 0, ok: false, params, error: e.message }
       }
     }
 
-    // Tests progressifs : on commence ultra simple et on ajoute de la complexité
+    const firstVideoId = videoIds[0]
     const tests = await Promise.all([
-      // 1. Le test le plus simple possible : MINE + 7 jours + metric unique
-      testQuery('T1_MINE_7j_views_only', {
+      // CONTOURNEMENT 1 : filter par video spécifique, pas de dimension, 30j
+      testQuery('W1_filter_video_30j_all_metrics', {
         ids: 'channel==MINE',
-        startDate: startDate7,
-        endDate: todayStr,
-        metrics: 'views',
+        startDate: startDate30, endDate: today,
+        metrics: 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares',
+        filters: `video==${firstVideoId}`,
       }),
-      // 2. Avec dimension video
-      testQuery('T2_MINE_7j_views_dim_video', {
+      // CONTOURNEMENT 2 : filter par video, plage 365 jours
+      testQuery('W2_filter_video_365j_all_metrics', {
         ids: 'channel==MINE',
-        startDate: startDate7,
-        endDate: todayStr,
+        startDate: startDate365, endDate: today,
+        metrics: 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares',
+        filters: `video==${firstVideoId}`,
+      }),
+      // CONTOURNEMENT 3 : filter par video, plage ALL TIME
+      testQuery('W3_filter_video_alltime_all_metrics', {
+        ids: 'channel==MINE',
+        startDate: startDateAll, endDate: today,
+        metrics: 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares',
+        filters: `video==${firstVideoId}`,
+      }),
+      // CONTOURNEMENT 4 : filter par video + revenue
+      testQuery('W4_filter_video_alltime_with_revenue', {
+        ids: 'channel==MINE',
+        startDate: startDateAll, endDate: today,
+        metrics: 'views,estimatedMinutesWatched,estimatedRevenue',
+        filters: `video==${firstVideoId}`,
+      }),
+      // CONTROLE : confirmer que dimension=video échoue toujours
+      testQuery('C1_dim_video_alltime', {
+        ids: 'channel==MINE',
+        startDate: startDateAll, endDate: today,
         dimensions: 'video',
         metrics: 'views',
       }),
-      // 3. Metric analytics classique
-      testQuery('T3_MINE_7j_watchtime', {
+      // CONTROLE : stats globales sans dim ni filter (devrait marcher)
+      testQuery('C2_global_alltime', {
         ids: 'channel==MINE',
-        startDate: startDate7,
-        endDate: todayStr,
-        dimensions: 'video',
-        metrics: 'estimatedMinutesWatched,views',
-      }),
-      // 4. Toutes les métriques sans revenue
-      testQuery('T4_MINE_30j_all_metrics_no_revenue', {
-        ids: 'channel==MINE',
-        startDate: startDate30,
-        endDate: todayStr,
-        dimensions: 'video',
-        metrics: 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares',
-      }),
-      // 5. Avec revenue
-      testQuery('T5_MINE_30j_all_metrics_with_revenue', {
-        ids: 'channel==MINE',
-        startDate: startDate30,
-        endDate: todayStr,
-        dimensions: 'video',
-        metrics: 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares,estimatedRevenue',
-      }),
-      // 6. Par ID explicite
-      testQuery('T6_ID_30j_all_metrics', {
-        ids: `channel==${channelId}`,
-        startDate: startDate30,
-        endDate: todayStr,
-        dimensions: 'video',
-        metrics: 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares',
-      }),
-      // 7. Plage large (comme dans sync-all actuel)
-      testQuery('T7_MINE_large_range_all_metrics', {
-        ids: 'channel==MINE',
-        startDate: '2013-01-01',
-        endDate: todayStr,
-        dimensions: 'video',
-        metrics: 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares',
-        maxResults: '500',
-        sort: '-estimatedMinutesWatched',
+        startDate: startDateAll, endDate: today,
+        metrics: 'views,estimatedMinutesWatched,subscribersGained,shares',
       }),
     ])
 
     return NextResponse.json({
-      diagnostic: 'YouTube Analytics API — tests séquentiels',
+      diagnostic: 'YouTube Analytics API V2 — tests de contournement filter=video',
       timestamp: new Date().toISOString(),
-      channel: {
-        id: channelId,
-        title: channel.snippet?.title,
-        subscriberCount: channel.statistics?.subscriberCount,
-        videoCount: channel.statistics?.videoCount,
-        viewCount: channel.statistics?.viewCount,
-      },
-      scopes_hint: 'Vérifier manuellement dans la session NextAuth',
+      channel: { id: channelId, title: channel.snippet?.title, subscriberCount: channel.statistics?.subscriberCount, videoCount: channel.statistics?.videoCount, viewCount: channel.statistics?.viewCount },
+      videosTested: videoIds,
+      firstVideoId,
       tests,
-      summary: {
-        passed: tests.filter(t => t.ok).map(t => t.label),
-        failed: tests.filter(t => !t.ok).map(t => ({ label: t.label, status: t.status })),
-      },
+      summary: { passed: tests.filter(t => t.ok).map(t => t.label), failed: tests.filter(t => !t.ok).map(t => ({ label: t.label, status: t.status })) },
     })
-  } catch (error: any) {
+  } catch (error) {
     return NextResponse.json({ error: error.message, stack: error.stack }, { status: 500 })
   }
 }

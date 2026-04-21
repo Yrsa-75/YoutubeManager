@@ -34,64 +34,104 @@ async function refreshChannelToken(channel: any, supabase: any) {
   }
 }
 
-// Attempt analytics fetch with a given metrics set.
-// Returns { rows, error } where error is a structured object we can surface.
-async function fetchAnalytics(
-  token: string,
-  channelId: string,
-  isPrimary: boolean,
-  oldestDate: string,
-  today: string,
-  metrics: string
-): Promise<{ rows: any[] | null; error: { type: string; status: number; message: string } | null }> {
-  // Strategy: if it's the primary (session) channel, try MINE first (works for owners).
-  // If not, or if MINE fails, fall back to channel==ID.
-  const tryUrls: Array<{ label: string; url: URL }> = []
+type AnalyticsResult = {
+  videoId: string
+  ok: boolean
+  status?: number
+  data?: { views: number; minutesWatched: number; avgDuration: number; avgPercentage: number; subsGained: number; subsLost: number; shares: number; revenue: number | null }
+  error?: string
+}
 
-  if (isPrimary) {
-    const u1 = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
-    u1.searchParams.set('ids', 'channel==MINE')
-    u1.searchParams.set('startDate', oldestDate)
-    u1.searchParams.set('endDate', today)
-    u1.searchParams.set('dimensions', 'video')
-    u1.searchParams.set('metrics', metrics)
-    u1.searchParams.set('maxResults', '500')
-    u1.searchParams.set('sort', '-estimatedMinutesWatched')
-    tryUrls.push({ label: 'MINE', url: u1 })
+// Fetch analytics for ONE video using filter=video==ID (contourne la restriction dim=video)
+async function fetchVideoAnalytics(
+  token: string,
+  channelIdsParam: string,
+  videoId: string,
+  startDate: string,
+  endDate: string,
+  tryRevenue: boolean
+): Promise<AnalyticsResult> {
+  const metricsWithRevenue = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares,estimatedRevenue'
+  const metricsNoRevenue = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares'
+
+  async function attempt(metrics: string): Promise<{ ok: boolean; row?: any[]; status?: number; errorMsg?: string }> {
+    const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
+    url.searchParams.set('ids', channelIdsParam)
+    url.searchParams.set('startDate', startDate)
+    url.searchParams.set('endDate', endDate)
+    url.searchParams.set('metrics', metrics)
+    url.searchParams.set('filters', `video==${videoId}`)
+    const r = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
+    const d = await r.json()
+    if (!r.ok) return { ok: false, status: r.status, errorMsg: d.error?.message || `HTTP ${r.status}` }
+    return { ok: true, row: d.rows?.[0] }
   }
 
-  const u2 = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
-  u2.searchParams.set('ids', `channel==${channelId}`)
-  u2.searchParams.set('startDate', oldestDate)
-  u2.searchParams.set('endDate', today)
-  u2.searchParams.set('dimensions', 'video')
-  u2.searchParams.set('metrics', metrics)
-  u2.searchParams.set('maxResults', '500')
-  u2.searchParams.set('sort', '-estimatedMinutesWatched')
-  tryUrls.push({ label: 'ID', url: u2 })
+  try {
+    const metrics = tryRevenue ? metricsWithRevenue : metricsNoRevenue
+    let res = await attempt(metrics)
 
-  let lastError: { type: string; status: number; message: string } | null = null
+    // Si erreur spécifiquement sur revenue, retry sans
+    if (!res.ok && tryRevenue && (res.errorMsg?.toLowerCase().includes('monetary') || res.errorMsg?.toLowerCase().includes('revenue'))) {
+      res = await attempt(metricsNoRevenue)
+      tryRevenue = false
+    }
 
-  for (const { label, url } of tryUrls) {
-    try {
-      const r = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
-      const d = await r.json()
-      if (r.ok) {
-        return { rows: d.rows || [], error: null }
-      }
-      const msg = d.error?.message || `HTTP ${r.status}`
-      lastError = {
-        type: r.status === 403 ? 'forbidden' : r.status === 400 ? 'bad_request' : 'api_error',
-        status: r.status,
-        message: `[${label}] ${msg}`,
-      }
-      // Si forbidden, on continue à essayer la stratégie suivante
-    } catch (e: any) {
-      lastError = { type: 'network', status: 0, message: `[${label}] ${e.message}` }
+    if (!res.ok) {
+      return { videoId, ok: false, status: res.status, error: res.errorMsg }
+    }
+
+    // Si pas de rows, la vidéo n'a pas de data mais la requête a réussi — renvoyer des zéros
+    const row = res.row || [0, 0, 0, 0, 0, 0, 0, ...(tryRevenue ? [0] : [])]
+
+    return {
+      videoId,
+      ok: true,
+      data: {
+        views: row[0] || 0,
+        minutesWatched: row[1] || 0,
+        avgDuration: row[2] || 0,
+        avgPercentage: row[3] || 0,
+        subsGained: row[4] || 0,
+        subsLost: row[5] || 0,
+        shares: row[6] || 0,
+        revenue: tryRevenue ? (row[7] || 0) : null,
+      },
+    }
+  } catch (e: any) {
+    return { videoId, ok: false, error: e.message }
+  }
+}
+
+// Process videos in parallel batches (max concurrency)
+async function fetchAllAnalytics(
+  token: string,
+  channelIdsParam: string,
+  videoIds: string[],
+  startDate: string,
+  endDate: string,
+  initialTryRevenue: boolean,
+  batchSize = 20
+): Promise<{ results: AnalyticsResult[]; revenueAvailable: boolean }> {
+  const results: AnalyticsResult[] = []
+  let tryRevenue = initialTryRevenue
+
+  for (let i = 0; i < videoIds.length; i += batchSize) {
+    const batch = videoIds.slice(i, i + batchSize)
+    const batchResults = await Promise.all(
+      batch.map((vid) => fetchVideoAnalytics(token, channelIdsParam, vid, startDate, endDate, tryRevenue))
+    )
+    results.push(...batchResults)
+
+    // Si on a tenté avec revenue et que le premier résultat du premier batch dit "monetary not allowed",
+    // on bascule en mode no-revenue pour les batches suivants
+    if (i === 0 && tryRevenue) {
+      const anyRevenueError = batchResults.some(r => !r.ok && r.error && (r.error.toLowerCase().includes('monetary') || r.error.toLowerCase().includes('revenue')))
+      if (anyRevenueError) tryRevenue = false
     }
   }
 
-  return { rows: null, error: lastError }
+  return { results, revenueAvailable: tryRevenue }
 }
 
 export async function POST() {
@@ -105,14 +145,8 @@ export async function POST() {
     warnings: Array<{ channel: string; reason: string; detail: string }>
     monetaryEnabled: boolean
   } = {
-    videos: 0,
-    analytics: 0,
-    playlists: 0,
-    associations: 0,
-    channels: 0,
-    errors: [],
-    warnings: [],
-    monetaryEnabled: true,
+    videos: 0, analytics: 0, playlists: 0, associations: 0, channels: 0,
+    errors: [], warnings: [], monetaryEnabled: true,
   }
 
   try {
@@ -124,7 +158,7 @@ export async function POST() {
     const userId = session.userId
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-    // Sync main channel from session (and remember its ID as "primary")
+    // Sync main channel and remember its ID
     let primaryChannelId: string | null = null
     try {
       const mineRes = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true', {
@@ -136,8 +170,7 @@ export async function POST() {
         primaryChannelId = ch.id
         const { data: ex } = await supabase.from('channels').select('is_selected').eq('user_id', userId).eq('channel_id', ch.id).single()
         await supabase.from('channels').upsert({
-          user_id: userId,
-          channel_id: ch.id,
+          user_id: userId, channel_id: ch.id,
           title: ch.snippet?.title,
           thumbnail_url: ch.snippet?.thumbnails?.default?.url,
           subscriber_count: parseInt(ch.statistics?.subscriberCount || '0'),
@@ -151,7 +184,6 @@ export async function POST() {
       results.errors.push('Main channel: ' + e.message)
     }
 
-    // Get selected channels with tokens
     const { data: selectedChannels } = await supabase.from('channels')
       .select('channel_id, title, user_id, access_token, refresh_token, token_expires_at')
       .eq('user_id', userId).eq('is_selected', true)
@@ -172,7 +204,8 @@ export async function POST() {
         token = await refreshChannelToken(channel, supabase)
       }
 
-      // STEP 1: Videos
+      // STEP 1: Videos via playlistItems (1 unit/page)
+      let videoIds: string[] = []
       try {
         const cr = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${chId}`, { headers: { Authorization: `Bearer ${token}` } })
         const cd = await cr.json()
@@ -180,7 +213,6 @@ export async function POST() {
         const uplId = cd.items?.[0]?.contentDetails?.relatedPlaylists?.uploads
         if (!uplId) throw new Error('No uploads playlist for ' + chName)
 
-        let allIds: string[] = []
         let npt: string | undefined
         do {
           const u = new URL('https://www.googleapis.com/youtube/v3/playlistItems')
@@ -191,14 +223,14 @@ export async function POST() {
           const r = await fetch(u.toString(), { headers: { Authorization: `Bearer ${token}` } })
           const d = await r.json()
           if (!r.ok) throw new Error(d.error?.message || 'Failed to list items')
-          allIds = allIds.concat((d.items || []).map((i: any) => i.contentDetails?.videoId).filter(Boolean))
+          videoIds = videoIds.concat((d.items || []).map((i: any) => i.contentDetails?.videoId).filter(Boolean))
           npt = d.nextPageToken
         } while (npt)
 
-        if (allIds.length > 0) {
+        if (videoIds.length > 0) {
           const allVids: any[] = []
-          for (let i = 0; i < allIds.length; i += 50) {
-            const b = allIds.slice(i, i + 50)
+          for (let i = 0; i < videoIds.length; i += 50) {
+            const b = videoIds.slice(i, i + 50)
             const u = new URL('https://www.googleapis.com/youtube/v3/videos')
             u.searchParams.set('part', 'snippet,contentDetails,statistics,status')
             u.searchParams.set('id', b.join(','))
@@ -208,17 +240,13 @@ export async function POST() {
             allVids.push(...(d.items || []))
           }
           const ins = allVids.map((v: any) => ({
-            user_id: userId,
-            channel_id: chId,
-            youtube_id: v.id,
-            title: v.snippet?.title,
-            description: v.snippet?.description,
+            user_id: userId, channel_id: chId, youtube_id: v.id,
+            title: v.snippet?.title, description: v.snippet?.description,
             thumbnail_url: v.snippet?.thumbnails?.medium?.url,
             published_at: v.snippet?.publishedAt,
             status: v.status?.privacyStatus,
             duration: v.contentDetails?.duration,
-            tags: v.snippet?.tags || [],
-            category_id: v.snippet?.categoryId,
+            tags: v.snippet?.tags || [], category_id: v.snippet?.categoryId,
             view_count: parseInt(v.statistics?.viewCount || '0'),
             like_count: parseInt(v.statistics?.likeCount || '0'),
             comment_count: parseInt(v.statistics?.commentCount || '0'),
@@ -234,67 +262,81 @@ export async function POST() {
         results.errors.push(`Videos (${chName}): ${e.message}`)
       }
 
-      // STEP 2: Analytics (with monetary fallback)
+      // STEP 2: Analytics — NOUVELLE STRATÉGIE: filter=video par vidéo, en parallèle
       try {
-        const { data: vids } = await supabase.from('videos').select('youtube_id, published_at')
-          .eq('user_id', userId).eq('channel_id', chId).order('published_at', { ascending: true })
+        if (videoIds.length > 0) {
+          // Date range : de la plus ancienne vidéo à aujourd'hui
+          const { data: oldestVideo } = await supabase.from('videos')
+            .select('published_at')
+            .eq('user_id', userId).eq('channel_id', chId)
+            .order('published_at', { ascending: true })
+            .limit(1).single()
 
-        if (vids && vids.length > 0) {
-          const oldest = vids[0]?.published_at ? new Date(vids[0].published_at).toISOString().split('T')[0] : '2005-01-01'
+          const oldest = oldestVideo?.published_at
+            ? new Date(oldestVideo.published_at).toISOString().split('T')[0]
+            : '2005-01-01'
           const today = new Date().toISOString().split('T')[0]
 
-          const metricsWithRevenue = 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares,estimatedRevenue'
-          const metricsNoRevenue = 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares'
+          // Stratégie des IDs: MINE si c'est la chaîne principale, sinon channel==ID
+          const idsParam = isPrimary ? 'channel==MINE' : `channel==${chId}`
 
-          // Try with revenue first
-          let { rows, error } = await fetchAnalytics(token, chId, isPrimary, oldest, today, metricsWithRevenue)
-          let hasRevenue = true
+          const { results: analyticsResults, revenueAvailable } = await fetchAllAnalytics(
+            token, idsParam, videoIds, oldest, today, true, 20
+          )
 
-          // If 403 specifically on revenue, retry without revenue metric
-          if (!rows && error && (error.message.toLowerCase().includes('monetary') || error.message.toLowerCase().includes('revenue'))) {
-            const retry = await fetchAnalytics(token, chId, isPrimary, oldest, today, metricsNoRevenue)
-            rows = retry.rows
-            error = retry.error
-            hasRevenue = false
-          }
+          const successful = analyticsResults.filter(r => r.ok)
+          const failed = analyticsResults.filter(r => !r.ok)
 
-          if (!rows && error) {
-            // Structured error message for UI
-            let reason = 'Erreur inconnue'
-            if (error.type === 'forbidden') {
+          // Si tous ont échoué, on considère que la chaîne est bloquée (genre Content ID / gestionnaire)
+          if (successful.length === 0 && failed.length > 0) {
+            const firstError = failed[0].error || 'Unknown'
+            const status = failed[0].status
+            let reason = 'Analytics non disponibles'
+            if (status === 403 || firstError.toLowerCase().includes('forbidden')) {
               reason = 'Analytics restreintes — tu n\'es pas propriétaire direct de cette chaîne (statut gestionnaire limité)'
-            } else if (error.type === 'bad_request') {
+            } else if (status === 400) {
               reason = 'Requête refusée par YouTube Analytics'
             } else {
-              reason = error.message
+              reason = firstError
             }
-            results.warnings.push({ channel: chName, reason, detail: error.message })
-            results.errors.push(`Analytics (${chName}): ${error.message}`)
-          } else if (rows && rows.length > 0) {
-            const ups = rows.map((row: any[]) => {
+            results.warnings.push({ channel: chName, reason, detail: firstError })
+            results.errors.push(`Analytics (${chName}): ${firstError}`)
+          } else {
+            // Update chaque vidéo avec ses analytics
+            const updates = successful.map(r => {
               const base: any = {
-                user_id: userId,
-                channel_id: chId,
-                youtube_id: row[0],
-                estimated_minutes_watched: row[1] || 0,
-                average_view_duration: row[2] || 0,
-                average_view_percentage: row[3] || 0,
-                subscribers_gained: row[4] || 0,
-                subscribers_lost: row[5] || 0,
-                shares: row[6] || 0,
+                user_id: userId, channel_id: chId, youtube_id: r.videoId,
+                estimated_minutes_watched: r.data!.minutesWatched,
+                average_view_duration: r.data!.avgDuration,
+                average_view_percentage: r.data!.avgPercentage,
+                subscribers_gained: r.data!.subsGained,
+                subscribers_lost: r.data!.subsLost,
+                shares: r.data!.shares,
                 analytics_synced_at: new Date().toISOString(),
               }
-              if (hasRevenue) {
-                base.estimated_revenue = row[7] || 0
+              if (r.data!.revenue !== null) {
+                base.estimated_revenue = r.data!.revenue
               }
               return base
             })
-            for (let i = 0; i < ups.length; i += 500) {
-              const { error } = await supabase.from('videos').upsert(ups.slice(i, i + 500), { onConflict: 'user_id,channel_id,youtube_id', ignoreDuplicates: false })
+
+            for (let i = 0; i < updates.length; i += 500) {
+              const { error } = await supabase.from('videos').upsert(updates.slice(i, i + 500), { onConflict: 'user_id,channel_id,youtube_id', ignoreDuplicates: false })
               if (error) throw error
             }
-            results.analytics += ups.length
-            if (!hasRevenue) {
+            results.analytics += updates.length
+
+            // Si certaines ont échoué mais pas toutes, warning soft
+            if (failed.length > 0) {
+              results.warnings.push({
+                channel: chName,
+                reason: `${failed.length}/${analyticsResults.length} vidéos sans analytics`,
+                detail: failed[0].error || '',
+              })
+            }
+
+            // Si revenue indispo
+            if (!revenueAvailable) {
               results.monetaryEnabled = false
               results.warnings.push({
                 channel: chName,
@@ -327,11 +369,8 @@ export async function POST() {
 
         if (allPl.length > 0) {
           const pli = allPl.map((p: any) => ({
-            user_id: userId,
-            channel_id: chId,
-            playlist_id: p.id,
-            title: p.snippet?.title,
-            description: p.snippet?.description,
+            user_id: userId, channel_id: chId, playlist_id: p.id,
+            title: p.snippet?.title, description: p.snippet?.description,
             thumbnail_url: p.snippet?.thumbnails?.medium?.url,
             video_count: p.contentDetails?.itemCount || 0,
             published_at: p.snippet?.publishedAt,

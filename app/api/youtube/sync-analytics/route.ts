@@ -5,43 +5,66 @@ import { createClient } from '@supabase/supabase-js'
 
 export const maxDuration = 60
 
-async function fetchAnalyticsPaginated(
+type AnalyticsResult = {
+  videoId: string
+  ok: boolean
+  status?: number
+  data?: { views: number; minutesWatched: number; avgDuration: number; avgPercentage: number; subsGained: number; subsLost: number; shares: number; revenue: number | null }
+  error?: string
+}
+
+async function fetchVideoAnalytics(
   token: string,
-  idsParam: string,
+  videoId: string,
   startDate: string,
   endDate: string,
-  metrics: string
-) {
-  let allRows: any[][] = []
-  let startIndex = 1
-  const PAGE_SIZE = 200
-  let lastError: { status: number; message: string } | null = null
+  tryRevenue: boolean
+): Promise<AnalyticsResult> {
+  const metricsWithRevenue = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares,estimatedRevenue'
+  const metricsNoRevenue = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares'
 
-  while (true) {
+  async function attempt(metrics: string) {
     const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
-    url.searchParams.set('ids', idsParam)
+    url.searchParams.set('ids', 'channel==MINE')
     url.searchParams.set('startDate', startDate)
     url.searchParams.set('endDate', endDate)
-    url.searchParams.set('dimensions', 'video')
     url.searchParams.set('metrics', metrics)
-    url.searchParams.set('maxResults', String(PAGE_SIZE))
-    url.searchParams.set('startIndex', String(startIndex))
-    url.searchParams.set('sort', '-estimatedMinutesWatched')
-
-    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
-    const data = await res.json()
-
-    if (!res.ok) {
-      lastError = { status: res.status, message: data.error?.message || `HTTP ${res.status}` }
-      return { rows: null, error: lastError }
-    }
-    if (!data.rows || data.rows.length === 0) break
-    allRows.push(...data.rows)
-    if (data.rows.length < PAGE_SIZE) break
-    startIndex += PAGE_SIZE
+    url.searchParams.set('filters', `video==${videoId}`)
+    const r = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
+    const d = await r.json()
+    if (!r.ok) return { ok: false, status: r.status, errorMsg: d.error?.message || `HTTP ${r.status}` }
+    return { ok: true, row: d.rows?.[0] }
   }
 
-  return { rows: allRows, error: null }
+  try {
+    let res = await attempt(tryRevenue ? metricsWithRevenue : metricsNoRevenue)
+
+    if (!res.ok && tryRevenue && (res.errorMsg?.toLowerCase().includes('monetary') || res.errorMsg?.toLowerCase().includes('revenue'))) {
+      res = await attempt(metricsNoRevenue)
+      tryRevenue = false
+    }
+
+    if (!res.ok) {
+      return { videoId, ok: false, status: res.status, error: res.errorMsg }
+    }
+
+    const row = res.row || [0, 0, 0, 0, 0, 0, 0, ...(tryRevenue ? [0] : [])]
+    return {
+      videoId, ok: true,
+      data: {
+        views: row[0] || 0,
+        minutesWatched: row[1] || 0,
+        avgDuration: row[2] || 0,
+        avgPercentage: row[3] || 0,
+        subsGained: row[4] || 0,
+        subsLost: row[5] || 0,
+        shares: row[6] || 0,
+        revenue: tryRevenue ? (row[7] || 0) : null,
+      },
+    }
+  } catch (e: any) {
+    return { videoId, ok: false, error: e.message }
+  }
 }
 
 export async function POST() {
@@ -63,11 +86,7 @@ export async function POST() {
 
     if (fetchError) throw fetchError
     if (!videos || videos.length === 0) {
-      return NextResponse.json({
-        success: true,
-        updated: 0,
-        message: 'Aucune vidéo à synchroniser.',
-      })
+      return NextResponse.json({ success: true, updated: 0, message: 'Aucune vidéo à synchroniser.' })
     }
 
     const oldestDate = videos[0]?.published_at
@@ -75,66 +94,71 @@ export async function POST() {
       : '2005-01-01'
     const today = new Date().toISOString().split('T')[0]
 
-    const metricsWithRevenue = 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares,estimatedRevenue'
-    const metricsNoRevenue = 'estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares'
+    const videoIds = videos.map(v => v.youtube_id)
+    const BATCH_SIZE = 20
+    let tryRevenue = true
+    const allResults: AnalyticsResult[] = []
 
-    // Try MINE with revenue first
-    let attempt = await fetchAnalyticsPaginated(token, 'channel==MINE', oldestDate, today, metricsWithRevenue)
-    let hasRevenue = true
+    for (let i = 0; i < videoIds.length; i += BATCH_SIZE) {
+      const batch = videoIds.slice(i, i + BATCH_SIZE)
+      const batchResults = await Promise.all(
+        batch.map(vid => fetchVideoAnalytics(token, vid, oldestDate, today, tryRevenue))
+      )
+      allResults.push(...batchResults)
 
-    // If revenue scope missing, retry without revenue
-    if (!attempt.rows && attempt.error &&
-      (attempt.error.message.toLowerCase().includes('monetary') ||
-        attempt.error.message.toLowerCase().includes('revenue'))) {
-      attempt = await fetchAnalyticsPaginated(token, 'channel==MINE', oldestDate, today, metricsNoRevenue)
-      hasRevenue = false
+      // Détection d'erreur revenue au premier batch
+      if (i === 0 && tryRevenue) {
+        const revenueErr = batchResults.some(r => !r.ok && r.error && (r.error.toLowerCase().includes('monetary') || r.error.toLowerCase().includes('revenue')))
+        if (revenueErr) tryRevenue = false
+      }
     }
 
-    if (!attempt.rows) {
-      const msg = attempt.error?.message || 'Unknown error'
-      const friendly = attempt.error?.status === 403
+    const successful = allResults.filter(r => r.ok)
+    const failed = allResults.filter(r => !r.ok)
+
+    if (successful.length === 0 && failed.length > 0) {
+      const firstError = failed[0].error || 'Unknown'
+      const status = failed[0].status
+      const friendly = status === 403
         ? 'Analytics restreintes : le compte connecté n\'est pas propriétaire direct de la chaîne (statut gestionnaire limité par l\'API YouTube).'
-        : msg
-      return NextResponse.json({ error: friendly, detail: msg, status: attempt.error?.status }, { status: 500 })
+        : firstError
+      return NextResponse.json({ error: friendly, detail: firstError, status }, { status: 500 })
     }
 
-    const allRows = attempt.rows
+    const updates = successful.map(r => {
+      const base: any = {
+        youtube_id: r.videoId,
+        estimated_minutes_watched: r.data!.minutesWatched,
+        average_view_duration: r.data!.avgDuration,
+        average_view_percentage: r.data!.avgPercentage,
+        subscribers_gained: r.data!.subsGained,
+        subscribers_lost: r.data!.subsLost,
+        shares: r.data!.shares,
+        analytics_synced_at: new Date().toISOString(),
+      }
+      if (r.data!.revenue !== null) {
+        base.estimated_revenue = r.data!.revenue
+      }
+      return base
+    })
 
     let totalUpdated = 0
-    if (allRows.length > 0) {
-      const updates = allRows.map((row: any[]) => {
-        const base: any = {
-          youtube_id: row[0],
-          estimated_minutes_watched: row[1] || 0,
-          average_view_duration: row[2] || 0,
-          average_view_percentage: row[3] || 0,
-          subscribers_gained: row[4] || 0,
-          subscribers_lost: row[5] || 0,
-          shares: row[6] || 0,
-          analytics_synced_at: new Date().toISOString(),
-        }
-        if (hasRevenue) {
-          base.estimated_revenue = row[7] || 0
-        }
-        return base
-      })
-
-      for (let i = 0; i < updates.length; i += 500) {
-        const batch = updates.slice(i, i + 500)
-        const { error: upsertError } = await supabase
-          .from('videos')
-          .upsert(batch, { onConflict: 'youtube_id', ignoreDuplicates: false })
-        if (upsertError) throw upsertError
-        totalUpdated += batch.length
-      }
+    for (let i = 0; i < updates.length; i += 500) {
+      const batch = updates.slice(i, i + 500)
+      const { error: upsertError } = await supabase
+        .from('videos')
+        .upsert(batch, { onConflict: 'youtube_id', ignoreDuplicates: false })
+      if (upsertError) throw upsertError
+      totalUpdated += batch.length
     }
 
     return NextResponse.json({
       success: true,
       updated: totalUpdated,
       total: videos.length,
-      hasRevenue,
-      message: `Analytics synchronisées pour ${totalUpdated} vidéos sur ${videos.length}${hasRevenue ? ' (avec revenus)' : ' (sans revenus — scope manquant)'}`,
+      failed: failed.length,
+      hasRevenue: tryRevenue,
+      message: `Analytics synchronisées pour ${totalUpdated}/${videos.length} vidéos${tryRevenue ? ' (avec revenus)' : ' (sans revenus)'}${failed.length > 0 ? ` — ${failed.length} en échec` : ''}`,
     })
   } catch (error: any) {
     console.error('Analytics sync error:', error)

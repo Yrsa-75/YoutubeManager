@@ -21,6 +21,7 @@ export interface Video {
   subscribers_gained?: number
   subscribers_lost?: number
   shares?: number
+  estimated_revenue?: number
   analytics_synced_at?: string
   // Playlists (joined from video_playlists)
   playlists?: { playlist_id: string; title: string }[]

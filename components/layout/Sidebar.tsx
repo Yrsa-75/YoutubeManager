@@ -30,8 +30,25 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
       if (data.analytics > 0) parts.push(data.analytics + ' analytics')
       if (data.playlists > 0) parts.push(data.playlists + ' playlists')
       toast.success(parts.join(', ') || 'Synchronisé !')
+      // Warnings : affichage doux (orange) pour les restrictions connues (chaînes gérées, etc.)
+      if (data.warnings && data.warnings.length > 0) {
+        data.warnings.forEach((w: { channel: string; reason: string; detail?: string }) => {
+          toast(`${w.channel} : ${w.reason}`, {
+            duration: 7000,
+            icon: '⚠️',
+            style: {
+              background: 'var(--bg-card)',
+              color: 'var(--text-primary)',
+              border: '1px solid #f59e0b',
+            },
+          })
+        })
+      }
+      // Erreurs "vraies" (pas déjà couvertes par les warnings)
       if (data.errors && data.errors.length > 0) {
-        data.errors.forEach((e: string) => toast.error(e, { duration: 5000 }))
+        const warningMessages = new Set((data.warnings || []).map((w: any) => w.detail))
+        const realErrors = data.errors.filter((e: string) => !Array.from(warningMessages).some((wm: any) => wm && e.includes(wm)))
+        realErrors.forEach((e: string) => toast.error(e, { duration: 5000 }))
       }
       setSyncStatus('Terminé')
       window.dispatchEvent(new CustomEvent('youtube-sync-done'))

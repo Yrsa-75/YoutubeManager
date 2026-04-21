@@ -43,6 +43,7 @@ const DEFAULT_COLUMNS = [
   { key: 'shares', label: 'Partages', enabled: false },
   { key: 'subscribers_gained', label: 'Abonnés +', enabled: false },
   { key: 'subscribers_lost', label: 'Abonnés -', enabled: false },
+  { key: 'estimated_revenue', label: 'Revenus', enabled: false },
   { key: 'playlists', label: 'Playlists', enabled: false },
   { key: 'tags', label: 'Tags', enabled: false },
 ]
@@ -180,6 +181,7 @@ export default function VideoTable({ searchQuery }: Props) {
         'Partages': v.shares || 0,
         'Abonnés gagnés': v.subscribers_gained || 0,
         'Abonnés perdus': v.subscribers_lost || 0,
+      'Revenus (€)': v.estimated_revenue || 0,
         'Playlists': (v.playlists || []).map(p => p.title).join(', '),
         'Tags': (v.tags || []).join(', '),
         'Description': v.description || '',
@@ -288,6 +290,8 @@ export default function VideoTable({ searchQuery }: Props) {
         return <span className="font-mono text-xs" style={{ color: video.subscribers_gained ? '#22c55e' : 'var(--text-muted)' }}>{video.subscribers_gained != null ? ('+' + formatNumber(video.subscribers_gained)) : '\u2014'}</span>
       case 'subscribers_lost':
         return <span className="font-mono text-xs" style={{ color: video.subscribers_lost ? '#ef4444' : 'var(--text-muted)' }}>{video.subscribers_lost != null ? ('-' + formatNumber(video.subscribers_lost)) : '\u2014'}</span>
+      case 'estimated_revenue':
+        return <span className="font-mono text-xs" style={{ color: video.estimated_revenue ? '#22c55e' : 'var(--text-muted)' }}>{video.estimated_revenue != null && video.estimated_revenue > 0 ? (video.estimated_revenue.toFixed(2) + ' €') : '\u2014'}</span>
       case 'playlists':
         return <span className="text-[11px] truncate block max-w-[120px]" style={{ color: 'var(--text-muted)' }}>{(video.playlists || []).map(p => p.title).join(', ') || '\u2014'}</span>
       case 'tags':

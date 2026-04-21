@@ -16,14 +16,12 @@ async function refreshAccessToken(token: any) {
     })
     const data = await response.json()
     if (!response.ok) throw data
-
     const refreshed = {
       ...token,
       accessToken: data.access_token,
       expiresAt: Math.floor(Date.now() / 1000) + data.expires_in,
       refreshToken: data.refresh_token ?? token.refreshToken,
     }
-
     // Update token in Supabase
     try {
       const supabase = createClient(
@@ -40,7 +38,6 @@ async function refreshAccessToken(token: any) {
     } catch (e) {
       console.error('Failed to update refreshed token:', e)
     }
-
     return refreshed
   } catch (error) {
     console.error('Token refresh failed:', error)
@@ -61,6 +58,7 @@ export const authOptions: NextAuthOptions = {
             'profile',
             'https://www.googleapis.com/auth/youtube.readonly',
             'https://www.googleapis.com/auth/yt-analytics.readonly',
+            'https://www.googleapis.com/auth/yt-analytics-monetary.readonly',
           ].join(' '),
           access_type: 'offline',
           prompt: 'consent',
@@ -74,7 +72,6 @@ export const authOptions: NextAuthOptions = {
         token.accessToken = account.access_token
         token.refreshToken = account.refresh_token
         token.expiresAt = account.expires_at
-
         // Store token in Supabase
         try {
           const supabase = createClient(
@@ -93,12 +90,10 @@ export const authOptions: NextAuthOptions = {
         }
         return token
       }
-
       // Token refresh: if expires in less than 5 minutes, refresh it
       if (token.expiresAt && (token.expiresAt as number) - Math.floor(Date.now() / 1000) < 300) {
         return refreshAccessToken(token)
       }
-
       return token
     },
     async session({ session, token }) {

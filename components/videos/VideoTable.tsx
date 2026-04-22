@@ -399,7 +399,7 @@ export default function VideoTable({ searchQuery }: Props) {
                     <tr key={video.youtube_id}
                       onClick={() => setSelectedVideo(isSelected ? null : video)}
                       className="group cursor-pointer transition-colors"
-                      style={{ background: isSelected ? 'var(--bg-hover)' : colorBg }}>
+                      style={{ background: isSelected ? 'var(--bg-hover)' : 'transparent' }}>
                       {activeColumns.map((col, colIndex) => (
                         <td key={col.key} className="px-3 py-2 border-b"
                           style={{

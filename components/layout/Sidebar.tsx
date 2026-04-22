@@ -1,6 +1,7 @@
 'use client'
+import { useRouter } from 'next/navigation'
 import { signOut, useSession } from 'next-auth/react'
-import { Play, Clock, Palette, RefreshCw, LogOut, BarChart2, Sun, Moon } from 'lucide-react'
+import { Play, Clock, Palette, RefreshCw, LogOut, BarChart2, Sun, Moon, Settings } from 'lucide-react'
 import type { TabType } from '@/types'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
@@ -121,6 +122,16 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
           style={{ color: 'var(--text-secondary)' }}>
           {theme === 'dark' ? <Sun size={12} /> : <Moon size={12} />}
           {theme === 'dark' ? 'Mode clair' : 'Mode sombre'}
+        </button>
+
+        {/* Settings */}
+        <button
+          onClick={() => { window.location.href = '/settings/channels' }}
+          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs hover:opacity-80 transition-opacity"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          <Settings size={12} />
+          Paramètres
         </button>
         {/* Sync */}
         <button onClick={handleSync} disabled={syncing}

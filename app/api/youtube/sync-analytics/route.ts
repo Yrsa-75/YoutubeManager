@@ -81,7 +81,7 @@ export async function POST() {
 
     const { data: videos, error: fetchError } = await supabase
       .from('videos')
-      .select('youtube_id, published_at')
+      .select('youtube_id, published_at, user_id, channel_id')
       .order('published_at', { ascending: true })
 
     if (fetchError) throw fetchError
@@ -95,6 +95,7 @@ export async function POST() {
     const today = new Date().toISOString().split('T')[0]
 
     const videoIds = videos.map(v => v.youtube_id)
+    const videoMeta = new Map(videos.map(v => [v.youtube_id, { user_id: v.user_id, channel_id: v.channel_id }]))
     const BATCH_SIZE = 20
     let tryRevenue = true
     const allResults: AnalyticsResult[] = []
@@ -126,7 +127,10 @@ export async function POST() {
     }
 
     const updates = successful.map(r => {
+      const meta = videoMeta.get(r.videoId) || { user_id: null, channel_id: null }
       const base: any = {
+        user_id: meta.user_id,
+        channel_id: meta.channel_id,
         youtube_id: r.videoId,
         estimated_minutes_watched: r.data!.minutesWatched,
         average_view_duration: r.data!.avgDuration,
@@ -147,7 +151,7 @@ export async function POST() {
       const batch = updates.slice(i, i + 500)
       const { error: upsertError } = await supabase
         .from('videos')
-        .upsert(batch, { onConflict: 'youtube_id', ignoreDuplicates: false })
+        .upsert(batch, { onConflict: 'user_id,channel_id,youtube_id', ignoreDuplicates: false })
       if (upsertError) throw upsertError
       totalUpdated += batch.length
     }

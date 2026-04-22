@@ -231,7 +231,9 @@ export async function POST() {
       const isPrimary = chId === primaryChannelId
       const isOperator = channel.access_role === 'operator'
 
-      // PHASE 4 : Chercher un token propriétaire dans channel_tokens (pour les chaînes déléguées)
+      // PHASE 4 (Fix 4b) : résolution intelligente du token
+      // Stratégie : ne prendre le token propriétaire que s'il est UTILISABLE
+      // Utilisable = expires_at dans le futur OU refresh_token valide pour renouveler
       let token: string = sessionToken
       let tokenSource: 'owner_delegated' | 'channel_stored' | 'session' = 'session'
 
@@ -240,55 +242,56 @@ export async function POST() {
         .eq('channel_id', chId)
         .maybeSingle()
 
-      if (ownerToken && ownerToken.access_token) {
-        // Token du vrai propriétaire disponible : on l'utilise en priorité
-        // (qu'on soit owner ou operator, c'est la source la plus fiable pour Analytics)
-        token = ownerToken.access_token
-        tokenSource = 'owner_delegated'
+      const nowSec = Math.floor(Date.now() / 1000)
+      const ownerTokenStillValid = ownerToken?.access_token
+        && ownerToken.expires_at
+        && ownerToken.expires_at - nowSec > 300
+      const ownerTokenCanRefresh = ownerToken?.refresh_token && ownerToken.refresh_token !== ''
 
-        // Refresh si besoin
-        if (ownerToken.refresh_token && ownerToken.expires_at && ownerToken.expires_at - Math.floor(Date.now() / 1000) < 300) {
-          try {
-            const refRes = await fetch('https://oauth2.googleapis.com/token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: new URLSearchParams({
-                client_id: process.env.GOOGLE_CLIENT_ID!,
-                client_secret: process.env.GOOGLE_CLIENT_SECRET!,
-                grant_type: 'refresh_token',
-                refresh_token: ownerToken.refresh_token,
-              }),
-            })
-            const refData = await refRes.json()
-            if (refRes.ok && refData.access_token) {
-              token = refData.access_token
-              await supabase.from('channel_tokens').update({
-                access_token: refData.access_token,
-                expires_at: Math.floor(Date.now() / 1000) + refData.expires_in,
-                last_refreshed_at: new Date().toISOString(),
-              }).eq('channel_id', chId)
-            }
-          } catch (e) {
-            // Refresh échoué, on tente avec le token existant
+      if (ownerTokenStillValid) {
+        // Token propriétaire récent et encore valide : on l'utilise
+        token = ownerToken!.access_token!
+        tokenSource = 'owner_delegated'
+      } else if (ownerTokenCanRefresh) {
+        // Token propriétaire expiré MAIS refreshable : on renouvelle
+        try {
+          const refRes = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              client_id: process.env.GOOGLE_CLIENT_ID!,
+              client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+              grant_type: 'refresh_token',
+              refresh_token: ownerToken!.refresh_token!,
+            }),
+          })
+          const refData = await refRes.json()
+          if (refRes.ok && refData.access_token) {
+            token = refData.access_token
+            tokenSource = 'owner_delegated'
+            await supabase.from('channel_tokens').update({
+              access_token: refData.access_token,
+              expires_at: nowSec + (refData.expires_in || 3600),
+              last_refreshed_at: new Date().toISOString(),
+            }).eq('channel_id', chId)
+          } else {
+            // Refresh échoué : fallback sur sessionToken (plus sûr qu'un token mort)
+            token = sessionToken
           }
+        } catch (e) {
+          token = sessionToken
         }
-      } else if (channel.access_token) {
-        // Legacy : fallback sur l'ancien token stocké dans channels
+      } else if (channel.access_token && (channel.token_expires_at ? channel.token_expires_at - nowSec > 300 : false)) {
+        // Legacy : fallback sur ancien token de channels si encore valide
         token = channel.access_token
         tokenSource = 'channel_stored'
         if (channel.refresh_token) {
           token = await refreshChannelToken(channel, supabase)
         }
-      } else if (isOperator) {
-        // Operator sans token propriétaire disponible : on skip l'Analytics pour cette chaîne
-        // (Data API basique sera tentée avec sessionToken en fallback, mais Analytics échouera gracieusement)
-        results.warnings.push({
-          channel: chName,
-          reason: 'Analytics indisponibles — le propriétaire n\'a pas encore accordé l\'accès',
-          detail: 'Aucun token propriétaire trouvé dans channel_tokens pour cette chaîne'
-        })
       }
-      // Sinon : token = sessionToken (cas owner sans token stocké spécifique)
+      // Sinon : token = sessionToken par défaut (seule option sûre)
+      // Si l'user est operator et qu'aucun token propriétaire n'est utilisable,
+      // le sessionToken va échouer sur Analytics mais c'est géré gracieusement plus bas
 
       // STEP 1: Videos via playlistItems (1 unit/page)
       let videoIds: string[] = []

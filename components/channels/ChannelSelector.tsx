@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { Plus, X, Check } from 'lucide-react'
+import { Plus, X, Check, Crown, UserCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 interface Channel {
@@ -9,6 +9,7 @@ interface Channel {
   thumbnail_url: string
   video_count: number
   is_selected: boolean
+  access_role?: 'owner' | 'operator' | 'viewer'
 }
 
 export default function ChannelSelector() {
@@ -87,6 +88,16 @@ export default function ChannelSelector() {
             <div className="w-5 h-5 rounded-full flex-shrink-0" style={{ background: 'var(--bg-hover)' }} />
           )}
           <span className="truncate flex-1 text-left" style={{ color: 'var(--text-primary)' }}>{ch.title}</span>
+              {ch.access_role === 'operator' && (
+                <span title="Vous êtes opérateur sur cette chaîne" className="inline-flex items-center" style={{ color: '#3b82f6' }}>
+                  <UserCheck size={11} />
+                </span>
+              )}
+              {ch.access_role === 'owner' && (
+                <span title="Vous êtes propriétaire de cette chaîne" className="inline-flex items-center" style={{ color: '#facc15' }}>
+                  <Crown size={11} />
+                </span>
+              )}
           {ch.is_selected && <Check size={12} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />}
         </button>
       ))}

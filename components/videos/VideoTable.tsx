@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo, useCallback } from 'react'
 import { ChevronUp, ChevronDown, Sparkles, ExternalLink, Settings2, Download, Filter } from 'lucide-react'
 import type { Video, ColorRule } from '@/types'
 import { formatNumber, formatDate, formatDuration, formatViewDuration, formatPercentage, formatMinutes } from '@/lib/utils/format'
+import { capShortsMetrics } from '@/lib/utils/shortsLoopCap'
 import { applyColorRules, applyAllColorRules } from '@/lib/utils/colorRules'
 import VideoDetailPanel from './VideoDetailPanel'
 import ColumnManager from './ColumnManager'
@@ -275,12 +276,37 @@ export default function VideoTable({ searchQuery }: Props) {
         return <span className="font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>{formatNumber(video.comment_count)}</span>
       case 'duration':
         return <span className="font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>{formatDuration(video.duration)}</span>
-      case 'average_view_duration':
-        return <span className="font-mono text-xs" style={{ color: video.average_view_duration ? 'var(--text-primary)' : 'var(--text-muted)' }}>{formatViewDuration(video.average_view_duration)}</span>
+      case 'average_view_duration': {
+        const capped = capShortsMetrics(video.duration, video.average_view_duration, video.average_view_percentage)
+        return (
+          <span className="font-mono text-xs inline-flex items-center gap-1" style={{ color: capped.avgViewDuration ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+            {formatViewDuration(capped.avgViewDuration)}
+            {capped.isLooped && (
+              <span
+                title={`Short avec boucles \u2014 valeur brute : ${formatViewDuration(capped.rawAvgViewDuration)}`}
+                className="text-[10px] cursor-help"
+                style={{ color: '#f59e0b' }}
+              >🔁</span>
+            )}
+          </span>
+        )
+      }
       case 'average_view_percentage': {
-        const pct = video.average_view_percentage
+        const cappedPct = capShortsMetrics(video.duration, video.average_view_duration, video.average_view_percentage)
+        const pct = cappedPct.avgViewPercentage
         const color = pct ? (pct >= 50 ? '#22c55e' : pct >= 30 ? '#f97316' : '#ef4444') : 'var(--text-muted)'
-        return <span className="font-mono text-xs font-medium" style={{ color }}>{formatPercentage(pct)}</span>
+        return (
+          <span className="font-mono text-xs font-medium inline-flex items-center gap-1" style={{ color }}>
+            {formatPercentage(pct)}
+            {cappedPct.isLooped && (
+              <span
+                title={`Short avec boucles \u2014 valeur brute : ${cappedPct.rawAvgViewPercentage?.toFixed(1)}%`}
+                className="text-[10px] cursor-help"
+                style={{ color: '#f59e0b' }}
+              >🔁</span>
+            )}
+          </span>
+        )
       }
       case 'estimated_minutes_watched':
         return <span className="font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>{formatMinutes(video.estimated_minutes_watched)}</span>

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { X, Sparkles, Copy, RotateCcw } from 'lucide-react'
 import type { Video } from '@/types'
 import { formatNumber, formatDate, formatDuration, formatViewDuration, formatPercentage, formatMinutes } from '@/lib/utils/format'
+import { capShortsMetrics } from '@/lib/utils/shortsLoopCap'
 import toast from 'react-hot-toast'
 
 interface Props { video: Video; onClose: () => void }
@@ -52,8 +53,10 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
   const totalDurationSec = durationMatch
     ? (parseInt(durationMatch[1] || '0') * 3600) + (parseInt(durationMatch[2] || '0') * 60) + parseInt(durationMatch[3] || '0')
     : 0
-  const avgViewSec = video.average_view_duration || 0
-  const avgPct = video.average_view_percentage || 0
+  const capped = capShortsMetrics(video.duration, video.average_view_duration, video.average_view_percentage)
+  const avgViewSec = capped.avgViewDuration || 0
+  const avgPct = capped.avgViewPercentage || 0
+  const isLooped = capped.isLooped
   const pctColor = avgPct >= 50 ? '#22c55e' : avgPct >= 30 ? '#f97316' : '#ef4444'
 
   const retentionRadius = 28
@@ -66,7 +69,7 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
     { label: 'Commentaires', value: formatNumber(video.comment_count) },
     { label: 'Durée', value: formatDuration(video.duration) },
     ...(hasAnalytics ? [
-      { label: 'Visionnage moy.', value: formatViewDuration(video.average_view_duration), sub: totalDurationSec > 0 ? `sur ${formatDuration(video.duration)}` : undefined },
+      { label: 'Visionnage moy.', value: formatViewDuration(avgViewSec), sub: totalDurationSec > 0 ? `sur ${formatDuration(video.duration)}` : undefined },
       { label: 'Temps regardé', value: formatMinutes(video.estimated_minutes_watched) },
       { label: 'Partages', value: formatNumber(video.shares || 0) },
       { label: 'Abonnés +', value: '+' + formatNumber(video.subscribers_gained || 0), color: '#22c55e' },
@@ -116,8 +119,15 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
               <text x="35" y="44" textAnchor="middle" fontSize="8" fill="var(--text-muted)">rétention</text>
             </svg>
             <div className="flex-1">
-              <div className="text-xs font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
+              <div className="text-xs font-semibold mb-1 inline-flex items-center gap-1" style={{ color: 'var(--text-primary)' }}>
                 {formatViewDuration(avgViewSec)} / {formatDuration(video.duration)}
+                {isLooped && (
+                  <span
+                    title={`Short avec boucles \u2014 valeurs brutes : ${formatViewDuration(capped.rawAvgViewDuration)} / ${capped.rawAvgViewPercentage?.toFixed(1)}%`}
+                    className="text-[10px] cursor-help"
+                    style={{ color: '#f59e0b' }}
+                  >🔁</span>
+                )}
               </div>
               <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-border)' }}>
                 <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(avgPct, 100)}%`, background: pctColor }} />

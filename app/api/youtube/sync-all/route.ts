@@ -184,9 +184,39 @@ export async function POST() {
       results.errors.push('Main channel: ' + e.message)
     }
 
-    const { data: selectedChannels } = await supabase.from('channels')
-      .select('channel_id, title, user_id, access_token, refresh_token, token_expires_at')
+    // PHASE 4 : Récupérer les chaînes via channel_access (owner OU operator)
+    const { data: accesses } = await supabase.from('channel_access')
+      .select('channel_id, role, is_selected')
       .eq('user_id', userId).eq('is_selected', true)
+
+    let selectedChannels: any[] = []
+
+    if (accesses && accesses.length > 0) {
+      // Nouveau chemin : chaînes via channel_access
+      const accessibleIds = accesses.map((a: any) => a.channel_id)
+      const { data: channelsData } = await supabase.from('channels')
+        .select('channel_id, title, user_id, access_token, refresh_token, token_expires_at, owner_user_id')
+        .in('channel_id', accessibleIds)
+
+      // Dédupliquer par channel_id (garder ligne canonique où user_id === owner_user_id)
+      const dedupedMap = new Map<string, any>()
+      for (const ch of channelsData || []) {
+        const existing = dedupedMap.get(ch.channel_id)
+        if (!existing || (ch.owner_user_id && ch.owner_user_id === ch.user_id && (!existing.owner_user_id || existing.owner_user_id !== existing.user_id))) {
+          dedupedMap.set(ch.channel_id, ch)
+        }
+      }
+      selectedChannels = Array.from(dedupedMap.values()).map(ch => {
+        const acc = accesses.find((a: any) => a.channel_id === ch.channel_id)
+        return { ...ch, access_role: acc?.role || 'owner' }
+      })
+    } else {
+      // Fallback legacy : ancien système user_id + is_selected
+      const { data: legacyChannels } = await supabase.from('channels')
+        .select('channel_id, title, user_id, access_token, refresh_token, token_expires_at')
+        .eq('user_id', userId).eq('is_selected', true)
+      selectedChannels = (legacyChannels || []).map((ch: any) => ({ ...ch, access_role: 'owner' }))
+    }
 
     if (!selectedChannels || selectedChannels.length === 0) {
       results.errors.push('Aucune chaîne sélectionnée')
@@ -199,10 +229,66 @@ export async function POST() {
       const chId = channel.channel_id
       const chName = channel.title || chId
       const isPrimary = chId === primaryChannelId
-      let token = channel.access_token || sessionToken
-      if (channel.refresh_token) {
-        token = await refreshChannelToken(channel, supabase)
+      const isOperator = channel.access_role === 'operator'
+
+      // PHASE 4 : Chercher un token propriétaire dans channel_tokens (pour les chaînes déléguées)
+      let token: string = sessionToken
+      let tokenSource: 'owner_delegated' | 'channel_stored' | 'session' = 'session'
+
+      const { data: ownerToken } = await supabase.from('channel_tokens')
+        .select('access_token, refresh_token, expires_at, owner_user_id')
+        .eq('channel_id', chId)
+        .maybeSingle()
+
+      if (ownerToken && ownerToken.access_token) {
+        // Token du vrai propriétaire disponible : on l'utilise en priorité
+        // (qu'on soit owner ou operator, c'est la source la plus fiable pour Analytics)
+        token = ownerToken.access_token
+        tokenSource = 'owner_delegated'
+
+        // Refresh si besoin
+        if (ownerToken.refresh_token && ownerToken.expires_at && ownerToken.expires_at - Math.floor(Date.now() / 1000) < 300) {
+          try {
+            const refRes = await fetch('https://oauth2.googleapis.com/token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({
+                client_id: process.env.GOOGLE_CLIENT_ID!,
+                client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+                grant_type: 'refresh_token',
+                refresh_token: ownerToken.refresh_token,
+              }),
+            })
+            const refData = await refRes.json()
+            if (refRes.ok && refData.access_token) {
+              token = refData.access_token
+              await supabase.from('channel_tokens').update({
+                access_token: refData.access_token,
+                expires_at: Math.floor(Date.now() / 1000) + refData.expires_in,
+                last_refreshed_at: new Date().toISOString(),
+              }).eq('channel_id', chId)
+            }
+          } catch (e) {
+            // Refresh échoué, on tente avec le token existant
+          }
+        }
+      } else if (channel.access_token) {
+        // Legacy : fallback sur l'ancien token stocké dans channels
+        token = channel.access_token
+        tokenSource = 'channel_stored'
+        if (channel.refresh_token) {
+          token = await refreshChannelToken(channel, supabase)
+        }
+      } else if (isOperator) {
+        // Operator sans token propriétaire disponible : on skip l'Analytics pour cette chaîne
+        // (Data API basique sera tentée avec sessionToken en fallback, mais Analytics échouera gracieusement)
+        results.warnings.push({
+          channel: chName,
+          reason: 'Analytics indisponibles — le propriétaire n\'a pas encore accordé l\'accès',
+          detail: 'Aucun token propriétaire trouvé dans channel_tokens pour cette chaîne'
+        })
       }
+      // Sinon : token = sessionToken (cas owner sans token stocké spécifique)
 
       // STEP 1: Videos via playlistItems (1 unit/page)
       let videoIds: string[] = []

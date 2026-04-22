@@ -42,8 +42,26 @@ export async function GET() {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // 3. Enrich each channel with access metadata (role, is_selected from channel_access)
-  const enriched = (channels || []).map(ch => {
+  // 3. DÉDUPLICATION : garder une seule ligne par channel_id
+  // Priorité : la ligne où user_id == owner_user_id (le vrai propriétaire en base)
+  const dedupedMap = new Map<string, any>()
+  for (const ch of channels || []) {
+    const existing = dedupedMap.get(ch.channel_id)
+    if (!existing) {
+      dedupedMap.set(ch.channel_id, ch)
+    } else {
+      // Si la nouvelle ligne a owner_user_id === user_id, elle est prioritaire
+      const newIsCanonical = ch.owner_user_id && ch.owner_user_id === ch.user_id
+      const existingIsCanonical = existing.owner_user_id && existing.owner_user_id === existing.user_id
+      if (newIsCanonical && !existingIsCanonical) {
+        dedupedMap.set(ch.channel_id, ch)
+      }
+    }
+  }
+  const uniqueChannels = Array.from(dedupedMap.values())
+
+  // 4. Enrich each channel with access metadata (role, is_selected from channel_access)
+  const enriched = uniqueChannels.map(ch => {
     const acc = accesses.find(a => a.channel_id === ch.channel_id)
     return {
       ...ch,

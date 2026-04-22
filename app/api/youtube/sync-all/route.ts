@@ -342,7 +342,7 @@ export async function POST() {
             synced_at: new Date().toISOString(),
           }))
           for (let i = 0; i < ins.length; i += 500) {
-            const { error } = await supabase.from('videos').upsert(ins.slice(i, i + 500), { onConflict: 'user_id,channel_id,youtube_id', ignoreDuplicates: false })
+            const { error } = await supabase.from('videos').upsert(ins.slice(i, i + 500), { onConflict: 'channel_id,youtube_id', ignoreDuplicates: false })
             if (error) throw error
           }
           results.videos += ins.length
@@ -410,7 +410,7 @@ export async function POST() {
             })
 
             for (let i = 0; i < updates.length; i += 500) {
-              const { error } = await supabase.from('videos').upsert(updates.slice(i, i + 500), { onConflict: 'user_id,channel_id,youtube_id', ignoreDuplicates: false })
+              const { error } = await supabase.from('videos').upsert(updates.slice(i, i + 500), { onConflict: 'channel_id,youtube_id', ignoreDuplicates: false })
               if (error) throw error
             }
             results.analytics += updates.length

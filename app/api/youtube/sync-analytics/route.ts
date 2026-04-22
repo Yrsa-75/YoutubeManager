@@ -151,7 +151,7 @@ export async function POST() {
       const batch = updates.slice(i, i + 500)
       const { error: upsertError } = await supabase
         .from('videos')
-        .upsert(batch, { onConflict: 'user_id,channel_id,youtube_id', ignoreDuplicates: false })
+        .upsert(batch, { onConflict: 'channel_id,youtube_id', ignoreDuplicates: false })
       if (upsertError) throw upsertError
       totalUpdated += batch.length
     }

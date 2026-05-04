@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Plus, Users, Crown, UserCheck, Trash2, X, Copy, Link as LinkIcon, Mail, Clock, Power, AlertTriangle } from 'lucide-react'
+import { Plus, Users, Crown, UserCheck, Trash2, X, Copy, Link as LinkIcon, Mail, Clock, Power, AlertTriangle, Lock, Info } from 'lucide-react'
 
 type Channel = {
   channel_id: string
@@ -9,7 +9,8 @@ type Channel = {
   thumbnail_url?: string
   subscriber_count?: number
   video_count?: number
-  access_role?: 'owner' | 'operator' | 'viewer'
+  access_role?: 'owner' | 'operator' | 'viewer' | 'viewer_limited'
+  analytics_available?: boolean
   granted_by?: string | null
 }
 
@@ -107,6 +108,8 @@ function ChannelRow({ channel, onChange }: { channel: Channel; onChange: () => v
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [busy, setBusy] = useState<'disconnect' | 'delete' | null>(null)
 
+  const isLimited = channel.access_role === 'viewer_limited' || channel.analytics_available === false
+
   async function handleDisconnect() {
     const ok = confirm(
       `Déconnecter « ${channel.title} » ?\n\n` +
@@ -162,15 +165,25 @@ function ChannelRow({ channel, onChange }: { channel: Channel; onChange: () => v
             <div className="w-12 h-12 rounded-full" style={{ background: 'var(--bg-hover)' }} />
           )}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>{channel.title}</span>
-              {channel.access_role === 'owner' ? (
+              {channel.access_role === 'owner' && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium" style={{ background: 'rgba(250,204,21,0.15)', color: '#facc15' }}>
                   <Crown size={12} /> Propriétaire
                 </span>
-              ) : (
+              )}
+              {channel.access_role === 'operator' && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium" style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6' }}>
                   <UserCheck size={12} /> Opérateur
+                </span>
+              )}
+              {channel.access_role === 'viewer_limited' && (
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium cursor-help"
+                  style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}
+                  title="Accès limité — vous êtes Manager YouTube mais pas Propriétaire. Les données Analytics et de monétisation ne sont pas accessibles via l'API."
+                >
+                  <Lock size={12} /> Accès limité
                 </span>
               )}
             </div>
@@ -191,16 +204,19 @@ function ChannelRow({ channel, onChange }: { channel: Channel; onChange: () => v
                 <Users size={14} className="inline mr-1" /> Accès
               </button>
             )}
-            <button
-              onClick={handleDisconnect}
-              disabled={busy !== null}
-              className="px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50"
-              style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}
-              title="Révoquer l'autorisation YouTube — vos données restent en place"
-            >
-              <Power size={14} className="inline mr-1" />
-              {busy === 'disconnect' ? '...' : 'Déconnecter'}
-            </button>
+            {/* Pas de bouton Déconnecter pour viewer_limited : pas de tokens OAuth à révoquer */}
+            {!isLimited && (
+              <button
+                onClick={handleDisconnect}
+                disabled={busy !== null}
+                className="px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50"
+                style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}
+                title="Révoquer l'autorisation YouTube — vos données restent en place"
+              >
+                <Power size={14} className="inline mr-1" />
+                {busy === 'disconnect' ? '...' : 'Déconnecter'}
+              </button>
+            )}
             <button
               onClick={() => setShowDeleteModal(true)}
               disabled={busy !== null}
@@ -393,7 +409,8 @@ function InviteRow({ invite, onChange }: { invite: Invite; onChange: () => void 
 }
 
 function AddChannelModal({ onClose }: { onClose: () => void }) {
-  const [mode, setMode] = useState<'choose' | 'owner' | 'delegate'>('choose')
+  const [mode, setMode] = useState<'choose' | 'owner' | 'limited' | 'delegate'>('choose')
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
       <div className="rounded-xl w-full max-w-lg p-6" style={{ background: 'var(--bg-card)', border: '1px solid var(--bg-border)' }}>
@@ -401,6 +418,7 @@ function AddChannelModal({ onClose }: { onClose: () => void }) {
           <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Ajouter une chaîne</h3>
           <button onClick={onClose} className="p-1"><X size={18} style={{ color: 'var(--text-muted)' }} /></button>
         </div>
+
         {mode === 'choose' && (
           <div className="space-y-3">
             <button
@@ -412,24 +430,40 @@ function AddChannelModal({ onClose }: { onClose: () => void }) {
                 <Crown size={16} style={{ color: '#facc15' }} /> Je suis propriétaire
               </div>
               <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                Connecter une chaîne dont je suis propriétaire direct du compte Google.
+                Connecter une chaîne dont je suis propriétaire direct du compte Google. Accès complet aux données et revenus.
               </div>
             </button>
+
+            <button
+              onClick={() => setMode('limited')}
+              className="w-full text-left border rounded-lg p-4 hover:opacity-90 transition"
+              style={{ borderColor: 'var(--bg-border)', background: 'var(--bg-hover)' }}
+            >
+              <div className="flex items-center gap-2 font-medium" style={{ color: 'var(--text-primary)' }}>
+                <Lock size={16} style={{ color: '#f59e0b' }} /> Je suis Manager <span className="text-xs font-normal" style={{ color: 'var(--text-muted)' }}>— accès limité</span>
+              </div>
+              <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                Connecter une chaîne dont je suis Manager YouTube sans en être le propriétaire. Stats publiques uniquement (pas d'analytics ni de revenus).
+              </div>
+            </button>
+
             <button
               onClick={() => setMode('delegate')}
               className="w-full text-left border rounded-lg p-4 hover:opacity-90 transition"
               style={{ borderColor: 'var(--bg-border)', background: 'var(--bg-hover)' }}
             >
               <div className="flex items-center gap-2 font-medium" style={{ color: 'var(--text-primary)' }}>
-                <UserCheck size={16} style={{ color: '#3b82f6' }} /> Je suis gestionnaire
+                <UserCheck size={16} style={{ color: '#3b82f6' }} /> Demander accès complet via invitation
               </div>
               <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                Demander au propriétaire d autoriser mon accès aux analytics.
+                Envoyer un lien d'invitation au propriétaire pour qu'il autorise mon accès aux analytics complètes.
               </div>
             </button>
           </div>
         )}
+
         {mode === 'owner' && <OwnerConnectFlow onClose={onClose} onBack={() => setMode('choose')} />}
+        {mode === 'limited' && <LimitedAccessFlow onClose={onClose} onBack={() => setMode('choose')} />}
         {mode === 'delegate' && <DelegateInviteFlow onClose={onClose} onBack={() => setMode('choose')} />}
       </div>
     </div>
@@ -450,12 +484,90 @@ function OwnerConnectFlow({ onClose, onBack }: { onClose: () => void; onBack: ()
   return (
     <div className="space-y-3">
       <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-        Cliquer sur « Importer » va récupérer toutes les chaînes Google auxquelles tu es connecté(e). Si tu veux ajouter une autre chaîne, reconnecte-toi d abord avec le compte Google qui la possède.
+        Cliquer sur « Importer » va récupérer toutes les chaînes Google auxquelles tu es connecté(e). Si tu veux ajouter une autre chaîne, reconnecte-toi d'abord avec le compte Google qui la possède.
       </p>
       <div className="flex gap-2 mt-4">
         <button onClick={onBack} className="px-4 py-2 rounded text-sm" style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}>Retour</button>
         <button onClick={sync} disabled={busy} className="px-4 py-2 rounded text-sm font-medium" style={{ background: 'var(--accent)', color: 'white' }}>
           {busy ? 'Import...' : 'Importer mes chaînes'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function LimitedAccessFlow({ onClose, onBack }: { onClose: () => void; onBack: () => void }) {
+  const [url, setUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function submit() {
+    if (!url.trim()) return toast.error('URL ou handle requis')
+    setBusy(true)
+    try {
+      const r = await fetch('/api/youtube/channels/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url.trim(), accessRole: 'viewer_limited' }),
+      })
+      const d = await r.json()
+      if (r.ok) {
+        toast.success(`« ${d.channel?.title || 'Chaîne'} » ajoutée en accès limité`)
+        onClose()
+      } else {
+        toast.error(d.error || 'Erreur')
+      }
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="p-3 rounded-md text-xs flex items-start gap-2" style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}>
+        <Info size={14} className="flex-shrink-0 mt-0.5" />
+        <div>
+          <div className="font-semibold mb-1">Ce qui sera disponible :</div>
+          <ul className="space-y-0.5 pl-3">
+            <li>• Liste des vidéos, métadonnées, durées</li>
+            <li>• Vues, likes, commentaires (stats publiques)</li>
+            <li>• Playlists et associations</li>
+          </ul>
+          <div className="font-semibold mt-2 mb-1">Ce qui ne sera PAS disponible :</div>
+          <ul className="space-y-0.5 pl-3">
+            <li>• Watch time, retention, durée moyenne de visionnage</li>
+            <li>• Audience, démographies, sources de trafic</li>
+            <li>• Revenus, CPM, RPM</li>
+          </ul>
+          <div className="mt-2 italic">
+            Pour débloquer ces données, demandez le rôle Propriétaire au vrai admin de la chaîne (ou utilisez le flow « Demander accès complet »).
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+          URL, handle ou ID de la chaîne YouTube
+        </label>
+        <input
+          type="text"
+          value={url}
+          onChange={e => setUrl(e.target.value)}
+          placeholder="@DecouverteEvasion ou https://youtube.com/@DecouverteEvasion"
+          className="w-full mt-1 px-3 py-2 rounded border text-sm"
+          style={{ background: 'var(--bg-primary)', borderColor: 'var(--bg-border)', color: 'var(--text-primary)' }}
+          onKeyDown={e => { if (e.key === 'Enter' && !busy) submit() }}
+        />
+        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+          Accepte : @handle, URL complète youtube.com/@..., ou ID UCxxxxxxx
+        </p>
+      </div>
+
+      <div className="flex gap-2 mt-4">
+        <button onClick={onBack} className="px-4 py-2 rounded text-sm" style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}>Retour</button>
+        <button onClick={submit} disabled={busy} className="flex-1 px-4 py-2 rounded text-sm font-medium" style={{ background: 'var(--accent)', color: 'white' }}>
+          {busy ? 'Ajout...' : 'Ajouter en accès limité'}
         </button>
       </div>
     </div>
@@ -514,7 +626,7 @@ function DelegateInviteFlow({ onClose, onBack }: { onClose: () => void; onBack: 
   return (
     <div className="space-y-3">
       <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-        Renseigne l ID YouTube de la chaîne (format UC...) et l email du propriétaire. Un lien sécurisé sera généré que tu pourras lui envoyer.
+        Renseigne l'ID YouTube de la chaîne (format UC...) et l'email du propriétaire. Un lien sécurisé sera généré que tu pourras lui envoyer.
       </p>
       <div>
         <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>ID de la chaîne (commence par UC)</label>
@@ -534,7 +646,7 @@ function DelegateInviteFlow({ onClose, onBack }: { onClose: () => void; onBack: 
       <div className="flex gap-2 mt-4">
         <button onClick={onBack} className="px-4 py-2 rounded text-sm" style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}>Retour</button>
         <button onClick={submit} disabled={busy} className="flex-1 px-4 py-2 rounded text-sm font-medium" style={{ background: 'var(--accent)', color: 'white' }}>
-          {busy ? 'Création...' : 'Créer le lien d invitation'}
+          {busy ? 'Création...' : "Créer le lien d'invitation"}
         </button>
       </div>
     </div>

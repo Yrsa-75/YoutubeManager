@@ -12,6 +12,15 @@ const supabase = createClient(
 // Retire mon accès à la chaîne. Si je suis le dernier user à y avoir accès,
 // nettoie en cascade toutes les données associées (videos, playlists, tokens, etc.).
 // Si d'autres users ont encore accès, leurs données restent intactes.
+//
+// IMPORTANT : on NE révoque PAS le refresh_token côté Google.
+// Raison : Google partage souvent le même refresh_token entre le flow NextAuth
+// (session de l'app) et le flow connect-channel. Si on appelle
+// oauth2.googleapis.com/revoke, on tue aussi la session NextAuth de l'utilisateur,
+// qui se retrouve déconnecté avec une erreur "invalid credentials".
+// Vider les tokens en base suffit : KAIROS ne peut plus les utiliser.
+// L'utilisateur peut révoquer manuellement sur https://myaccount.google.com/permissions
+// s'il veut couper l'autorisation côté Google.
 export async function DELETE(req: NextRequest, { params }: { params: { channelId: string } }) {
   try {
     const session = await getServerSession(authOptions)
@@ -33,28 +42,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { channelId
       return NextResponse.json({ error: 'Aucun accès à cette chaîne' }, { status: 403 })
     }
 
-    // 2. Récupérer mon refresh token avant suppression, pour le révoquer côté Google
-    const { data: channelRow } = await supabase
-      .from('channels')
-      .select('refresh_token')
-      .eq('user_id', userId)
-      .eq('channel_id', channelId)
-      .maybeSingle()
-
-    // 3. Révoquer le refresh token côté Google (best-effort — non bloquant)
-    if (channelRow?.refresh_token) {
-      try {
-        await fetch('https://oauth2.googleapis.com/revoke', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({ token: channelRow.refresh_token }),
-        })
-      } catch (e) {
-        console.warn('[delete-channel] Google revoke failed:', e)
-      }
-    }
-
-    // 4. Tracker chaque opération de cleanup pour debug si quelque chose foire
+    // 2. Tracker chaque opération de cleanup pour debug si quelque chose foire
     const cleanupResults: Record<string, { ok: boolean; error?: string }> = {}
 
     async function safeDelete(label: string, fn: () => Promise<{ error: any }>) {
@@ -66,7 +54,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { channelId
       }
     }
 
-    // 5. Toujours fait : retirer MON accès et MA ligne dans channels
+    // 3. Toujours fait : retirer MON accès et MA ligne dans channels (avec mes tokens)
     await safeDelete('channel_access (mine)', () => supabase
       .from('channel_access')
       .delete()
@@ -79,7 +67,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { channelId
       .eq('user_id', userId)
       .eq('channel_id', channelId))
 
-    // 6. Vérifier s'il reste d'autres users avec accès à cette chaîne
+    // 4. Vérifier s'il reste d'autres users avec accès à cette chaîne
     const { count: remainingCount } = await supabase
       .from('channel_access')
       .select('*', { count: 'exact', head: true })
@@ -87,27 +75,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { channelId
 
     const hasOtherUsers = (remainingCount || 0) > 0
 
-    // 7. Si je suis le dernier, on nettoie tout en cascade
+    // 5. Si je suis le dernier, on nettoie tout en cascade
     if (!hasOtherUsers) {
-      // Révoquer aussi le token shared dans channel_tokens si présent
-      const { data: ownerToken } = await supabase
-        .from('channel_tokens')
-        .select('refresh_token')
-        .eq('channel_id', channelId)
-        .maybeSingle()
-
-      if (ownerToken?.refresh_token) {
-        try {
-          await fetch('https://oauth2.googleapis.com/revoke', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ token: ownerToken.refresh_token }),
-          })
-        } catch (e) {
-          console.warn('[delete-channel] Google revoke (channel_tokens) failed:', e)
-        }
-      }
-
       await safeDelete('videos', () => supabase
         .from('videos')
         .delete()

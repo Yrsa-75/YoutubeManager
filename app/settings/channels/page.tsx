@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Plus, Users, Crown, UserCheck, Trash2, X, Copy, Link as LinkIcon, Mail, Clock } from 'lucide-react'
+import { Plus, Users, Crown, UserCheck, Trash2, X, Copy, Link as LinkIcon, Mail, Clock, Power, AlertTriangle } from 'lucide-react'
 
 type Channel = {
   channel_id: string
@@ -104,42 +104,193 @@ export default function ChannelsSettingsPage() {
 
 function ChannelRow({ channel, onChange }: { channel: Channel; onChange: () => void }) {
   const [showAccess, setShowAccess] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [busy, setBusy] = useState<'disconnect' | 'delete' | null>(null)
+
+  async function handleDisconnect() {
+    const ok = confirm(
+      `Déconnecter « ${channel.title} » ?\n\n` +
+      `L'autorisation YouTube sera révoquée mais toutes vos données (vidéos, analytics, ` +
+      `playlists, configurations) seront conservées.\n\nVous pourrez reconnecter la chaîne ` +
+      `quand vous voulez.`
+    )
+    if (!ok) return
+
+    setBusy('disconnect')
+    try {
+      const r = await fetch(`/api/youtube/channels/${channel.channel_id}/disconnect`, { method: 'POST' })
+      const d = await r.json()
+      if (r.ok) {
+        toast.success(d.message || 'Chaîne déconnectée')
+        onChange()
+      } else {
+        toast.error(d.error || 'Erreur de déconnexion')
+      }
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function handleDelete() {
+    setBusy('delete')
+    try {
+      const r = await fetch(`/api/youtube/channels/${channel.channel_id}`, { method: 'DELETE' })
+      const d = await r.json()
+      if (r.ok) {
+        toast.success(d.message || 'Chaîne supprimée')
+        setShowDeleteModal(false)
+        onChange()
+      } else {
+        toast.error(d.error || 'Erreur de suppression')
+      }
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
-    <div className="border rounded-lg p-4 transition-colors" style={{ borderColor: 'var(--bg-border)', background: 'var(--bg-card)' }}>
-      <div className="flex items-center gap-4">
-        {channel.thumbnail_url ? (
-          <img src={channel.thumbnail_url} alt={channel.title} className="w-12 h-12 rounded-full" />
-        ) : (
-          <div className="w-12 h-12 rounded-full" style={{ background: 'var(--bg-hover)' }} />
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>{channel.title}</span>
-            {channel.access_role === 'owner' ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium" style={{ background: 'rgba(250,204,21,0.15)', color: '#facc15' }}>
-                <Crown size={12} /> Propriétaire
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium" style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6' }}>
-                <UserCheck size={12} /> Opérateur
-              </span>
-            )}
+    <>
+      <div className="border rounded-lg p-4 transition-colors" style={{ borderColor: 'var(--bg-border)', background: 'var(--bg-card)' }}>
+        <div className="flex items-center gap-4 flex-wrap">
+          {channel.thumbnail_url ? (
+            <img src={channel.thumbnail_url} alt={channel.title} className="w-12 h-12 rounded-full" />
+          ) : (
+            <div className="w-12 h-12 rounded-full" style={{ background: 'var(--bg-hover)' }} />
+          )}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>{channel.title}</span>
+              {channel.access_role === 'owner' ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium" style={{ background: 'rgba(250,204,21,0.15)', color: '#facc15' }}>
+                  <Crown size={12} /> Propriétaire
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium" style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6' }}>
+                  <UserCheck size={12} /> Opérateur
+                </span>
+              )}
+            </div>
+            <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              {channel.subscriber_count ?? 0} abonnés · {channel.video_count ?? 0} vidéos
+            </div>
           </div>
-          <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            {channel.subscriber_count ?? 0} abonnés · {channel.video_count ?? 0} vidéos
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {channel.access_role === 'owner' && (
+              <button
+                onClick={() => setShowAccess(v => !v)}
+                disabled={busy !== null}
+                className="px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50"
+                style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}
+                title="Voir et gérer qui a accès à cette chaîne"
+              >
+                <Users size={14} className="inline mr-1" /> Accès
+              </button>
+            )}
+            <button
+              onClick={handleDisconnect}
+              disabled={busy !== null}
+              className="px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50"
+              style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}
+              title="Révoquer l'autorisation YouTube — vos données restent en place"
+            >
+              <Power size={14} className="inline mr-1" />
+              {busy === 'disconnect' ? '...' : 'Déconnecter'}
+            </button>
+            <button
+              onClick={() => setShowDeleteModal(true)}
+              disabled={busy !== null}
+              className="px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50"
+              style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}
+              title="Supprimer cette chaîne et toutes ses données"
+            >
+              <Trash2 size={14} className="inline mr-1" /> Supprimer
+            </button>
           </div>
         </div>
-        {channel.access_role === 'owner' && (
+        {showAccess && <ChannelAccessManager channelId={channel.channel_id} onChange={onChange} />}
+      </div>
+
+      {showDeleteModal && (
+        <DeleteChannelModal
+          channel={channel}
+          onClose={() => setShowDeleteModal(false)}
+          onConfirm={handleDelete}
+          busy={busy === 'delete'}
+        />
+      )}
+    </>
+  )
+}
+
+function DeleteChannelModal({
+  channel,
+  onClose,
+  onConfirm,
+  busy,
+}: {
+  channel: Channel
+  onClose: () => void
+  onConfirm: () => void
+  busy: boolean
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+      <div className="rounded-xl w-full max-w-lg p-6" style={{ background: 'var(--bg-card)', border: '1px solid var(--bg-border)' }}>
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-start gap-3">
+            <div className="rounded-full p-2" style={{ background: 'rgba(239,68,68,0.15)' }}>
+              <AlertTriangle size={20} style={{ color: '#ef4444' }} />
+            </div>
+            <h3 className="text-lg font-semibold pt-1" style={{ color: 'var(--text-primary)' }}>
+              Supprimer « {channel.title} » ?
+            </h3>
+          </div>
+          <button onClick={onClose} disabled={busy} className="p-1 disabled:opacity-50">
+            <X size={18} style={{ color: 'var(--text-muted)' }} />
+          </button>
+        </div>
+
+        <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
+          Cette action retirera votre accès à cette chaîne dans KAIROS :
+        </p>
+        <ul className="text-sm space-y-1.5 mb-4 pl-2" style={{ color: 'var(--text-secondary)' }}>
+          <li>• Votre autorisation YouTube sera révoquée côté Google</li>
+          <li>• Vos paramètres (colonnes, filtres, règles de couleur) seront effacés</li>
+          <li>• Si vous êtes le seul utilisateur avec accès, <strong>toutes les données</strong> (vidéos, analytics, playlists) seront supprimées définitivement</li>
+          <li>• Si d'autres utilisateurs ont accès, leurs données seront conservées</li>
+        </ul>
+
+        <div className="p-3 rounded-md mb-5 text-xs flex items-start gap-2" style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444' }}>
+          <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+          <span>
+            Action irréversible. Vous pourrez reconnecter la chaîne plus tard, mais l'historique sera reconstruit depuis YouTube.
+          </span>
+        </div>
+
+        <div className="flex justify-end gap-2">
           <button
-            onClick={() => setShowAccess(v => !v)}
-            className="px-3 py-1.5 rounded text-xs font-medium transition-colors"
+            onClick={onClose}
+            disabled={busy}
+            className="px-4 py-2 rounded text-sm font-medium disabled:opacity-50"
             style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}
           >
-            <Users size={14} className="inline mr-1" /> Gérer les accès
+            Annuler
           </button>
-        )}
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            className="px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-50"
+            style={{ background: '#ef4444' }}
+          >
+            {busy ? 'Suppression...' : 'Supprimer définitivement'}
+          </button>
+        </div>
       </div>
-      {showAccess && <ChannelAccessManager channelId={channel.channel_id} onChange={onChange} />}
     </div>
   )
 }

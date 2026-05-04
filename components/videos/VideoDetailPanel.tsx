@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { X, Sparkles, Copy, RotateCcw } from 'lucide-react'
+import { X, Sparkles, Copy, RotateCcw, Lock } from 'lucide-react'
 import type { Video } from '@/types'
 import { formatNumber, formatDate, formatDuration, formatViewDuration, formatPercentage, formatMinutes } from '@/lib/utils/format'
 import { capShortsMetrics } from '@/lib/utils/shortsLoopCap'
@@ -14,6 +14,8 @@ const LANGUAGES = [
   { code: 'es', label: 'ES', flag: '🇪🇸' },
   { code: 'de', label: 'DE', flag: '🇩🇪' },
 ]
+
+const LIMITED_TOOLTIP = "Données indisponibles — chaîne en accès limité (Manager YouTube)"
 
 export default function VideoDetailPanel({ video, onClose }: Props) {
   const [loading, setLoading] = useState<string | null>(null)
@@ -47,8 +49,15 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
     toast.success('Copié !')
   }
 
-  // Analytics data
-  const hasAnalytics = video.average_view_duration || video.average_view_percentage || video.estimated_minutes_watched
+  // Drapeau accès limité (transmis par VideoTable via la vidéo enrichie)
+  const isAnalyticsLimited = (video as any)._isAnalyticsLimited === true
+
+  // Analytics data — si la chaîne est en accès limité, on considère qu'il n'y a PAS d'analytics
+  // (les zéros en base sont trompeurs : YouTube renvoie "0" en string, qui est truthy en JS)
+  const hasAnalytics = !isAnalyticsLimited && (
+    video.average_view_duration || video.average_view_percentage || video.estimated_minutes_watched
+  )
+
   const durationMatch = video.duration?.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
   const totalDurationSec = durationMatch
     ? (parseInt(durationMatch[1] || '0') * 3600) + (parseInt(durationMatch[2] || '0') * 60) + parseInt(durationMatch[3] || '0')
@@ -63,18 +72,33 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
   const retentionCircumference = 2 * Math.PI * retentionRadius
   const retentionOffset = retentionCircumference * (1 - avgPct / 100)
 
-  const metricCards = [
+  // Cards : on garde les 4 publiques toujours, et on adapte les analytics selon le mode
+  const publicCards = [
     { label: 'Vues', value: formatNumber(video.view_count), color: 'var(--text-primary)' },
     { label: 'Likes', value: formatNumber(video.like_count) },
     { label: 'Commentaires', value: formatNumber(video.comment_count) },
     { label: 'Durée', value: formatDuration(video.duration) },
-    ...(hasAnalytics ? [
-      { label: 'Visionnage moy.', value: formatViewDuration(avgViewSec), sub: totalDurationSec > 0 ? `sur ${formatDuration(video.duration)}` : undefined },
-      { label: 'Temps regardé', value: formatMinutes(video.estimated_minutes_watched) },
-      { label: 'Partages', value: formatNumber(video.shares || 0) },
-      { label: 'Abonnés +', value: '+' + formatNumber(video.subscribers_gained || 0), color: '#22c55e' },
-      { label: 'Abonnés -', value: '-' + formatNumber(video.subscribers_lost || 0), color: '#ef4444' },
-    ] : []),
+  ]
+
+  const analyticsCardsAvailable = [
+    { label: 'Visionnage moy.', value: formatViewDuration(avgViewSec), sub: totalDurationSec > 0 ? `sur ${formatDuration(video.duration)}` : undefined },
+    { label: 'Temps regardé', value: formatMinutes(video.estimated_minutes_watched) },
+    { label: 'Partages', value: formatNumber(video.shares || 0) },
+    { label: 'Abonnés +', value: '+' + formatNumber(video.subscribers_gained || 0), color: '#22c55e' },
+    { label: 'Abonnés -', value: '-' + formatNumber(video.subscribers_lost || 0), color: '#ef4444' },
+  ]
+
+  const analyticsCardsLimited = [
+    { label: 'Visionnage moy.', value: '—', sub: 'Indisponible', limited: true },
+    { label: 'Temps regardé', value: '—', sub: 'Indisponible', limited: true },
+    { label: 'Partages', value: '—', sub: 'Indisponible', limited: true },
+    { label: 'Abonnés +', value: '—', sub: 'Indisponible', limited: true },
+    { label: 'Abonnés -', value: '—', sub: 'Indisponible', limited: true },
+  ]
+
+  const metricCards = [
+    ...publicCards,
+    ...(isAnalyticsLimited ? analyticsCardsLimited : (hasAnalytics ? analyticsCardsAvailable : [])),
   ]
 
   return (
@@ -107,7 +131,23 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
           </div>
         </div>
 
-        {/* Retention gauge */}
+        {/* Encart "accès limité" — affiché uniquement si la chaîne est en mode Manager limité */}
+        {isAnalyticsLimited && (
+          <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--bg-border)' }}>
+            <div className="p-3 rounded-md text-xs flex items-start gap-2" style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)' }}>
+              <Lock size={14} className="flex-shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
+              <div style={{ color: '#f59e0b' }}>
+                <div className="font-semibold mb-1">Accès limité (Manager YouTube)</div>
+                <div className="opacity-90 leading-relaxed">
+                  Les analytics (rétention, watch time, revenus) ne sont pas accessibles via l'API YouTube pour cette chaîne.
+                  Demandez le rôle <strong>Propriétaire</strong> au vrai admin pour les débloquer.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Retention gauge — masquée si accès limité */}
         {hasAnalytics && avgPct > 0 && (
           <div className="px-4 py-3 border-b flex items-center gap-4" style={{ borderColor: 'var(--bg-border)' }}>
             <svg width="70" height="70" viewBox="0 0 70 70">
@@ -140,13 +180,25 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
         {/* Metric cards */}
         <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--bg-border)' }}>
           <div className="grid grid-cols-3 gap-1.5">
-            {metricCards.map((c, i) => (
-              <div key={i} className="rounded-lg p-2.5 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)' }}>
-                <div className="text-[10px] mb-0.5" style={{ color: 'var(--text-muted)' }}>{c.label}</div>
-                <div className="font-mono text-sm font-semibold" style={{ color: c.color || 'var(--text-primary)' }}>{c.value}</div>
-                {c.sub && <div className="text-[9px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{c.sub}</div>}
-              </div>
-            ))}
+            {metricCards.map((c, i) => {
+              const isLimitedCard = (c as any).limited === true
+              return (
+                <div
+                  key={i}
+                  className={isLimitedCard ? 'rounded-lg p-2.5 border cursor-help' : 'rounded-lg p-2.5 border'}
+                  style={{
+                    background: 'var(--bg-card)',
+                    borderColor: 'var(--bg-border)',
+                    opacity: isLimitedCard ? 0.6 : 1,
+                  }}
+                  title={isLimitedCard ? LIMITED_TOOLTIP : undefined}
+                >
+                  <div className="text-[10px] mb-0.5" style={{ color: 'var(--text-muted)' }}>{c.label}</div>
+                  <div className="font-mono text-sm font-semibold" style={{ color: (c as any).color || 'var(--text-primary)' }}>{c.value}</div>
+                  {(c as any).sub && <div className="text-[9px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{(c as any).sub}</div>}
+                </div>
+              )
+            })}
           </div>
         </div>
 

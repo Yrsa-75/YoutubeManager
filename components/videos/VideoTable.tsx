@@ -49,7 +49,24 @@ const DEFAULT_COLUMNS = [
   { key: 'tags', label: 'Tags', enabled: false },
 ]
 
-type VideoWithColor = Video & { _colors: string[] }
+// Champs qui dépendent de l'API YouTube Analytics (pas accessibles en mode Manager limité)
+const ANALYTICS_FIELDS = new Set([
+  'average_view_duration',
+  'average_view_percentage',
+  'estimated_minutes_watched',
+  'shares',
+  'subscribers_gained',
+  'subscribers_lost',
+  'estimated_revenue',
+])
+
+const LIMITED_TOOLTIP = "Données indisponibles — chaîne en accès limité (Manager YouTube). Demandez le rôle Propriétaire pour débloquer les analytics."
+
+type VideoWithColor = Video & {
+  _colors: string[]
+  _isAnalyticsLimited?: boolean
+  _channelTitle?: string
+}
 
 export default function VideoTable({ searchQuery }: Props) {
   const [videos, setVideos] = useState<Video[]>([])
@@ -67,10 +84,13 @@ export default function VideoTable({ searchQuery }: Props) {
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilter[]>([])
   const [exporting, setExporting] = useState(false)
   const [columnsLoaded, setColumnsLoaded] = useState(false)
+  // Map channel_id -> { analytics_available, title, access_role }
+  const [channelsMap, setChannelsMap] = useState<Map<string, { analytics_available: boolean; title: string; access_role?: string }>>(new Map())
 
   // Load persisted column config on mount
   useEffect(() => {
     loadColumnConfig()
+    loadChannelsMeta()
   }, [])
 
   useEffect(() => {
@@ -85,7 +105,10 @@ export default function VideoTable({ searchQuery }: Props) {
   }, [searchQuery, sortBy, sortDir, statusFilter])
 
   useEffect(() => {
-    const handler = () => fetchVideos()
+    const handler = () => {
+      fetchVideos()
+      loadChannelsMeta()
+    }
     window.addEventListener('youtube-sync-done', handler)
     return () => window.removeEventListener('youtube-sync-done', handler)
   }, [])
@@ -120,6 +143,26 @@ export default function VideoTable({ searchQuery }: Props) {
       console.error('Failed to load column config:', e)
     } finally {
       setColumnsLoaded(true)
+    }
+  }
+
+  async function loadChannelsMeta() {
+    try {
+      const res = await fetch('/api/youtube/channels')
+      const data = await res.json()
+      const m = new Map<string, { analytics_available: boolean; title: string; access_role?: string }>()
+      for (const ch of data.channels || []) {
+        m.set(ch.channel_id, {
+          // Si analytics_available est explicitement false (viewer_limited), on marque comme limited
+          // Sinon (true, undefined, null) on considère que les analytics sont accessibles
+          analytics_available: ch.analytics_available !== false,
+          title: ch.title || '',
+          access_role: ch.access_role,
+        })
+      }
+      setChannelsMap(m)
+    } catch (e) {
+      console.error('Failed to load channels meta:', e)
     }
   }
 
@@ -167,28 +210,32 @@ export default function VideoTable({ searchQuery }: Props) {
     setExporting(true)
     try {
       const XLSX = await import('xlsx')
-      const exportData = filteredVideos.map(v => ({
-        'ID YouTube': v.youtube_id,
-        'Titre': v.title,
-        'Statut': v.status,
-        'Date upload': v.published_at ? new Date(v.published_at).toLocaleDateString('fr-FR') : '',
-        'Vues': v.view_count,
-        'Likes': v.like_count,
-        'Commentaires': v.comment_count,
-        'Durée': formatDuration(v.duration),
-        'Durée moy. visionnage': v.average_view_duration ? formatViewDuration(v.average_view_duration) : '',
-        '% regardé': v.average_view_percentage ? v.average_view_percentage.toFixed(1) + '%' : '',
-        'Temps regardé (min)': v.estimated_minutes_watched || 0,
-        'Partages': v.shares || 0,
-        'Abonnés gagnés': v.subscribers_gained || 0,
-        'Abonnés perdus': v.subscribers_lost || 0,
-      'Revenus (€)': v.estimated_revenue || 0,
-        'Playlists': (v.playlists || []).map(p => p.title).join(', '),
-        'Tags': (v.tags || []).join(', '),
-        'Description': v.description || '',
-        'URL': 'https://youtube.com/watch?v=' + v.youtube_id,
-        'Catégorie couleur': v._colors.length > 0 ? v._colors.map(c => colorRules.find(r => r.color === c)?.name || c).join(', ') : '',
-      }))
+      const exportData = filteredVideos.map(v => {
+        const limited = v._isAnalyticsLimited
+        return {
+          'ID YouTube': v.youtube_id,
+          'Chaîne': v._channelTitle || '',
+          'Titre': v.title,
+          'Statut': v.status,
+          'Date upload': v.published_at ? new Date(v.published_at).toLocaleDateString('fr-FR') : '',
+          'Vues': v.view_count,
+          'Likes': v.like_count,
+          'Commentaires': v.comment_count,
+          'Durée': formatDuration(v.duration),
+          'Durée moy. visionnage': limited ? 'N/A (accès limité)' : (v.average_view_duration ? formatViewDuration(v.average_view_duration) : ''),
+          '% regardé': limited ? 'N/A (accès limité)' : (v.average_view_percentage ? v.average_view_percentage.toFixed(1) + '%' : ''),
+          'Temps regardé (min)': limited ? 'N/A' : (v.estimated_minutes_watched || 0),
+          'Partages': limited ? 'N/A' : (v.shares || 0),
+          'Abonnés gagnés': limited ? 'N/A' : (v.subscribers_gained || 0),
+          'Abonnés perdus': limited ? 'N/A' : (v.subscribers_lost || 0),
+          'Revenus (€)': limited ? 'N/A' : (v.estimated_revenue || 0),
+          'Playlists': (v.playlists || []).map(p => p.title).join(', '),
+          'Tags': (v.tags || []).join(', '),
+          'Description': v.description || '',
+          'URL': 'https://youtube.com/watch?v=' + v.youtube_id,
+          'Catégorie couleur': v._colors.length > 0 ? v._colors.map(c => colorRules.find(r => r.color === c)?.name || c).join(', ') : '',
+        }
+      })
       const ws = XLSX.utils.json_to_sheet(exportData)
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, 'Vidéos')
@@ -213,9 +260,17 @@ export default function VideoTable({ searchQuery }: Props) {
       let colors: string[] = []
       try { colors = applyAllColorRules(v, colorRules) } catch { colors = color ? [color] : [] }
       if (!Array.isArray(colors)) colors = color ? [color] : []
-      return { ...v, _color: color, _colors: colors }
+      const chMeta = channelsMap.get((v as any).channel_id)
+      const isLimited = chMeta ? !chMeta.analytics_available : false
+      return {
+        ...v,
+        _color: color,
+        _colors: colors,
+        _isAnalyticsLimited: isLimited,
+        _channelTitle: chMeta?.title || (v as any).channel_title || '',
+      } as VideoWithColor
     }),
-    [videos, colorRules]
+    [videos, colorRules, channelsMap]
   )
 
   // Apply color filter + advanced filters
@@ -227,6 +282,8 @@ export default function VideoTable({ searchQuery }: Props) {
     // Apply advanced filters
     for (const filter of advancedFilters) {
       result = result.filter(v => {
+        // Si la vidéo est en accès limité ET le filtre porte sur un champ analytics, on l'exclut
+        if (v._isAnalyticsLimited && ANALYTICS_FIELDS.has(filter.field)) return false
         const val = (v as any)[filter.field]
         if (val == null) return false
         const numVal = Number(val)
@@ -252,7 +309,26 @@ export default function VideoTable({ searchQuery }: Props) {
   const colorRuleFilters = colorRules.filter(r => r.enabled).slice(0, 4)
   const nonSortable = ['thumbnail_url', 'tags', 'playlists']
 
+  // Cellule générique pour les fields analytics indisponibles (mode Manager limité)
+  function limitedAnalyticsCell() {
+    return (
+      <span
+        className="font-mono text-xs cursor-help inline-flex items-center gap-1"
+        style={{ color: 'var(--text-muted)' }}
+        title={LIMITED_TOOLTIP}
+      >
+        —
+        <span className="text-[10px] opacity-60">🔒</span>
+      </span>
+    )
+  }
+
   function renderCell(video: VideoWithColor, colKey: string) {
+    // Court-circuit : si la vidéo est en accès limité ET la colonne est analytics, afficher tiret avec tooltip
+    if (video._isAnalyticsLimited && ANALYTICS_FIELDS.has(colKey)) {
+      return limitedAnalyticsCell()
+    }
+
     switch (colKey) {
       case 'thumbnail_url':
         return video.thumbnail_url

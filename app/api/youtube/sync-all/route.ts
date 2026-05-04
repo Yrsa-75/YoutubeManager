@@ -224,7 +224,9 @@ export async function POST() {
       const chName = channel.title || chId
       const isPrimary = chId === primaryChannelId
 
-      // ✨ NEW : skip Analytics si l'user est en accès limité ou si la chaîne est marquée non-analytics
+      // Skip Analytics si l'user est en accès limité (viewer_limited) ou si la chaîne
+      // est explicitement marquée non-analytics (ce flag n'est positionné qu'au moment
+      // de l'ajout via le flow Manager limité, plus jamais en auto par le sync)
       const skipAnalytics = channel.access_role === 'viewer_limited' || channel.analytics_available === false
 
       // Résolution du token (logique inchangée)
@@ -375,11 +377,24 @@ export async function POST() {
               const status = failed[0].status
               let reason = 'Analytics non disponibles'
               if (status === 403 || firstError.toLowerCase().includes('forbidden')) {
-                reason = 'Analytics restreintes — tu n\'es pas propriétaire direct de cette chaîne (statut gestionnaire limité)'
-
-                // Auto-flag : marquer la chaîne comme analytics_available=false pour la prochaine fois
-                await supabase.from('channels').update({ analytics_available: false })
-                  .eq('channel_id', chId)
+                // ⚠️ IMPORTANT : on ne marque PLUS la chaîne en analytics_available=false ici.
+                //
+                // Raison : une 403 peut venir de plusieurs causes qui ne sont PAS un manque
+                // permanent d'accès analytics sur la chaîne :
+                //   1. Le current user est operator/non-owner et n'a pas de channel_tokens délégué
+                //      → on tombe sur le sessionToken qui n'a pas les droits Analytics sur cette chaîne
+                //   2. Le token utilisé a expiré ou été révoqué côté Google
+                //   3. Rate limit transitoire, problème réseau, etc.
+                //
+                // Marquer analytics_available=false impacte TOUS les users qui voient cette chaîne
+                // (le flag n'est pas user-spécifique), y compris le vrai propriétaire qui a tous
+                // les droits. Ça brisait l'affichage des analytics pour les owners légitimes.
+                //
+                // Le flag analytics_available=false n'est positionné qu'à un seul endroit :
+                // dans /api/youtube/channels/add quand l'user choisit explicitement le flow
+                // "Manager limité" (accessRole=viewer_limited). C'est le seul cas où on est SÛR
+                // que l'API Analytics ne sera jamais accessible pour cette chaîne.
+                reason = 'Analytics inaccessibles avec le token actuel (manque de droits ou token invalide)'
               } else if (status === 400) {
                 reason = 'Requête refusée par YouTube Analytics'
               } else {

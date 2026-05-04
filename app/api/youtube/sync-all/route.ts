@@ -42,7 +42,6 @@ type AnalyticsResult = {
   error?: string
 }
 
-// Fetch analytics for ONE video using filter=video==ID (contourne la restriction dim=video)
 async function fetchVideoAnalytics(
   token: string,
   channelIdsParam: string,
@@ -71,7 +70,6 @@ async function fetchVideoAnalytics(
     const metrics = tryRevenue ? metricsWithRevenue : metricsNoRevenue
     let res = await attempt(metrics)
 
-    // Si erreur spécifiquement sur revenue, retry sans
     if (!res.ok && tryRevenue && (res.errorMsg?.toLowerCase().includes('monetary') || res.errorMsg?.toLowerCase().includes('revenue'))) {
       res = await attempt(metricsNoRevenue)
       tryRevenue = false
@@ -81,7 +79,6 @@ async function fetchVideoAnalytics(
       return { videoId, ok: false, status: res.status, error: res.errorMsg }
     }
 
-    // Si pas de rows, la vidéo n'a pas de data mais la requête a réussi — renvoyer des zéros
     const row = res.row || [0, 0, 0, 0, 0, 0, 0, ...(tryRevenue ? [0] : [])]
 
     return {
@@ -103,7 +100,6 @@ async function fetchVideoAnalytics(
   }
 }
 
-// Process videos in parallel batches (max concurrency)
 async function fetchAllAnalytics(
   token: string,
   channelIdsParam: string,
@@ -123,8 +119,6 @@ async function fetchAllAnalytics(
     )
     results.push(...batchResults)
 
-    // Si on a tenté avec revenue et que le premier résultat du premier batch dit "monetary not allowed",
-    // on bascule en mode no-revenue pour les batches suivants
     if (i === 0 && tryRevenue) {
       const anyRevenueError = batchResults.some(r => !r.ok && r.error && (r.error.toLowerCase().includes('monetary') || r.error.toLowerCase().includes('revenue')))
       if (anyRevenueError) tryRevenue = false
@@ -141,11 +135,13 @@ export async function POST() {
     playlists: number
     associations: number
     channels: number
+    channelsSkippedAnalytics: number
     errors: string[]
     warnings: Array<{ channel: string; reason: string; detail: string }>
     monetaryEnabled: boolean
   } = {
     videos: 0, analytics: 0, playlists: 0, associations: 0, channels: 0,
+    channelsSkippedAnalytics: 0,
     errors: [], warnings: [], monetaryEnabled: true,
   }
 
@@ -158,7 +154,7 @@ export async function POST() {
     const userId = session.userId
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
-    // Sync main channel and remember its ID
+    // Sync main channel
     let primaryChannelId: string | null = null
     try {
       const mineRes = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true', {
@@ -178,13 +174,14 @@ export async function POST() {
           is_selected: ex?.is_selected ?? true,
           access_token: sessionToken,
           synced_at: new Date().toISOString(),
+          analytics_available: true,
         }, { onConflict: 'user_id,channel_id', ignoreDuplicates: false })
       }
     } catch (e: any) {
       results.errors.push('Main channel: ' + e.message)
     }
 
-    // PHASE 4 : Récupérer les chaînes via channel_access (owner OU operator)
+    // Récupérer les chaînes via channel_access (incluant le rôle)
     const { data: accesses } = await supabase.from('channel_access')
       .select('channel_id, role, is_selected')
       .eq('user_id', userId).eq('is_selected', true)
@@ -192,13 +189,11 @@ export async function POST() {
     let selectedChannels: any[] = []
 
     if (accesses && accesses.length > 0) {
-      // Nouveau chemin : chaînes via channel_access
       const accessibleIds = accesses.map((a: any) => a.channel_id)
       const { data: channelsData } = await supabase.from('channels')
-        .select('channel_id, title, user_id, access_token, refresh_token, token_expires_at, owner_user_id')
+        .select('channel_id, title, user_id, access_token, refresh_token, token_expires_at, owner_user_id, analytics_available')
         .in('channel_id', accessibleIds)
 
-      // Dédupliquer par channel_id (garder ligne canonique où user_id === owner_user_id)
       const dedupedMap = new Map<string, any>()
       for (const ch of channelsData || []) {
         const existing = dedupedMap.get(ch.channel_id)
@@ -211,9 +206,8 @@ export async function POST() {
         return { ...ch, access_role: acc?.role || 'owner' }
       })
     } else {
-      // Fallback legacy : ancien système user_id + is_selected
       const { data: legacyChannels } = await supabase.from('channels')
-        .select('channel_id, title, user_id, access_token, refresh_token, token_expires_at')
+        .select('channel_id, title, user_id, access_token, refresh_token, token_expires_at, analytics_available')
         .eq('user_id', userId).eq('is_selected', true)
       selectedChannels = (legacyChannels || []).map((ch: any) => ({ ...ch, access_role: 'owner' }))
     }
@@ -229,11 +223,11 @@ export async function POST() {
       const chId = channel.channel_id
       const chName = channel.title || chId
       const isPrimary = chId === primaryChannelId
-      const isOperator = channel.access_role === 'operator'
 
-      // PHASE 4 (Fix 4b) : résolution intelligente du token
-      // Stratégie : ne prendre le token propriétaire que s'il est UTILISABLE
-      // Utilisable = expires_at dans le futur OU refresh_token valide pour renouveler
+      // ✨ NEW : skip Analytics si l'user est en accès limité ou si la chaîne est marquée non-analytics
+      const skipAnalytics = channel.access_role === 'viewer_limited' || channel.analytics_available === false
+
+      // Résolution du token (logique inchangée)
       let token: string = sessionToken
       let tokenSource: 'owner_delegated' | 'channel_stored' | 'session' = 'session'
 
@@ -249,11 +243,9 @@ export async function POST() {
       const ownerTokenCanRefresh = ownerToken?.refresh_token && ownerToken.refresh_token !== ''
 
       if (ownerTokenStillValid) {
-        // Token propriétaire récent et encore valide : on l'utilise
         token = ownerToken!.access_token!
         tokenSource = 'owner_delegated'
       } else if (ownerTokenCanRefresh) {
-        // Token propriétaire expiré MAIS refreshable : on renouvelle
         try {
           const refRes = await fetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
@@ -275,23 +267,18 @@ export async function POST() {
               last_refreshed_at: new Date().toISOString(),
             }).eq('channel_id', chId)
           } else {
-            // Refresh échoué : fallback sur sessionToken (plus sûr qu'un token mort)
             token = sessionToken
           }
         } catch (e) {
           token = sessionToken
         }
       } else if (channel.access_token && (channel.token_expires_at ? channel.token_expires_at - nowSec > 300 : false)) {
-        // Legacy : fallback sur ancien token de channels si encore valide
         token = channel.access_token
         tokenSource = 'channel_stored'
         if (channel.refresh_token) {
           token = await refreshChannelToken(channel, supabase)
         }
       }
-      // Sinon : token = sessionToken par défaut (seule option sûre)
-      // Si l'user est operator et qu'aucun token propriétaire n'est utilisable,
-      // le sessionToken va échouer sur Analytics mais c'est géré gracieusement plus bas
 
       // STEP 1: Videos via playlistItems (1 unit/page)
       let videoIds: string[] = []
@@ -351,92 +338,100 @@ export async function POST() {
         results.errors.push(`Videos (${chName}): ${e.message}`)
       }
 
-      // STEP 2: Analytics — NOUVELLE STRATÉGIE: filter=video par vidéo, en parallèle
-      try {
-        if (videoIds.length > 0) {
-          // Date range : de la plus ancienne vidéo à aujourd'hui
-          const { data: oldestVideo } = await supabase.from('videos')
-            .select('published_at')
-            .eq('user_id', userId).eq('channel_id', chId)
-            .order('published_at', { ascending: true })
-            .limit(1).single()
+      // STEP 2: Analytics — sauf si chaîne en accès limité
+      if (skipAnalytics) {
+        results.channelsSkippedAnalytics++
+        // Pas un warning d'erreur — c'est attendu pour viewer_limited
+        results.warnings.push({
+          channel: chName,
+          reason: 'Analytics non synchronisées (accès limité)',
+          detail: 'Cette chaîne est en mode Manager YouTube — l\'API Analytics est inaccessible. Vidéos et métadonnées synchronisées normalement.',
+        })
+      } else {
+        try {
+          if (videoIds.length > 0) {
+            const { data: oldestVideo } = await supabase.from('videos')
+              .select('published_at')
+              .eq('user_id', userId).eq('channel_id', chId)
+              .order('published_at', { ascending: true })
+              .limit(1).single()
 
-          const oldest = oldestVideo?.published_at
-            ? new Date(oldestVideo.published_at).toISOString().split('T')[0]
-            : '2005-01-01'
-          const today = new Date().toISOString().split('T')[0]
+            const oldest = oldestVideo?.published_at
+              ? new Date(oldestVideo.published_at).toISOString().split('T')[0]
+              : '2005-01-01'
+            const today = new Date().toISOString().split('T')[0]
 
-          // Stratégie des IDs: MINE si c'est la chaîne principale, sinon channel==ID
-          const idsParam = isPrimary ? 'channel==MINE' : `channel==${chId}`
+            const idsParam = isPrimary ? 'channel==MINE' : `channel==${chId}`
 
-          const { results: analyticsResults, revenueAvailable } = await fetchAllAnalytics(
-            token, idsParam, videoIds, oldest, today, true, 20
-          )
+            const { results: analyticsResults, revenueAvailable } = await fetchAllAnalytics(
+              token, idsParam, videoIds, oldest, today, true, 20
+            )
 
-          const successful = analyticsResults.filter(r => r.ok)
-          const failed = analyticsResults.filter(r => !r.ok)
+            const successful = analyticsResults.filter(r => r.ok)
+            const failed = analyticsResults.filter(r => !r.ok)
 
-          // Si tous ont échoué, on considère que la chaîne est bloquée (genre Content ID / gestionnaire)
-          if (successful.length === 0 && failed.length > 0) {
-            const firstError = failed[0].error || 'Unknown'
-            const status = failed[0].status
-            let reason = 'Analytics non disponibles'
-            if (status === 403 || firstError.toLowerCase().includes('forbidden')) {
-              reason = 'Analytics restreintes — tu n\'es pas propriétaire direct de cette chaîne (statut gestionnaire limité)'
-            } else if (status === 400) {
-              reason = 'Requête refusée par YouTube Analytics'
+            if (successful.length === 0 && failed.length > 0) {
+              const firstError = failed[0].error || 'Unknown'
+              const status = failed[0].status
+              let reason = 'Analytics non disponibles'
+              if (status === 403 || firstError.toLowerCase().includes('forbidden')) {
+                reason = 'Analytics restreintes — tu n\'es pas propriétaire direct de cette chaîne (statut gestionnaire limité)'
+
+                // Auto-flag : marquer la chaîne comme analytics_available=false pour la prochaine fois
+                await supabase.from('channels').update({ analytics_available: false })
+                  .eq('channel_id', chId)
+              } else if (status === 400) {
+                reason = 'Requête refusée par YouTube Analytics'
+              } else {
+                reason = firstError
+              }
+              results.warnings.push({ channel: chName, reason, detail: firstError })
+              results.errors.push(`Analytics (${chName}): ${firstError}`)
             } else {
-              reason = firstError
-            }
-            results.warnings.push({ channel: chName, reason, detail: firstError })
-            results.errors.push(`Analytics (${chName}): ${firstError}`)
-          } else {
-            // Update chaque vidéo avec ses analytics
-            const updates = successful.map(r => {
-              const base: any = {
-                user_id: userId, channel_id: chId, youtube_id: r.videoId,
-                estimated_minutes_watched: r.data!.minutesWatched,
-                average_view_duration: r.data!.avgDuration,
-                average_view_percentage: r.data!.avgPercentage,
-                subscribers_gained: r.data!.subsGained,
-                subscribers_lost: r.data!.subsLost,
-                shares: r.data!.shares,
-                analytics_synced_at: new Date().toISOString(),
-              }
-              if (r.data!.revenue !== null) {
-                base.estimated_revenue = r.data!.revenue
-              }
-              return base
-            })
-
-            for (let i = 0; i < updates.length; i += 500) {
-              const { error } = await supabase.from('videos').upsert(updates.slice(i, i + 500), { onConflict: 'channel_id,youtube_id', ignoreDuplicates: false })
-              if (error) throw error
-            }
-            results.analytics += updates.length
-
-            // Si certaines ont échoué mais pas toutes, warning soft
-            if (failed.length > 0) {
-              results.warnings.push({
-                channel: chName,
-                reason: `${failed.length}/${analyticsResults.length} vidéos sans analytics`,
-                detail: failed[0].error || '',
+              const updates = successful.map(r => {
+                const base: any = {
+                  user_id: userId, channel_id: chId, youtube_id: r.videoId,
+                  estimated_minutes_watched: r.data!.minutesWatched,
+                  average_view_duration: r.data!.avgDuration,
+                  average_view_percentage: r.data!.avgPercentage,
+                  subscribers_gained: r.data!.subsGained,
+                  subscribers_lost: r.data!.subsLost,
+                  shares: r.data!.shares,
+                  analytics_synced_at: new Date().toISOString(),
+                }
+                if (r.data!.revenue !== null) {
+                  base.estimated_revenue = r.data!.revenue
+                }
+                return base
               })
-            }
 
-            // Si revenue indispo
-            if (!revenueAvailable) {
-              results.monetaryEnabled = false
-              results.warnings.push({
-                channel: chName,
-                reason: 'Revenus non disponibles pour cette chaîne',
-                detail: 'Scope monétaire non autorisé ou propriété restreinte',
-              })
+              for (let i = 0; i < updates.length; i += 500) {
+                const { error } = await supabase.from('videos').upsert(updates.slice(i, i + 500), { onConflict: 'channel_id,youtube_id', ignoreDuplicates: false })
+                if (error) throw error
+              }
+              results.analytics += updates.length
+
+              if (failed.length > 0) {
+                results.warnings.push({
+                  channel: chName,
+                  reason: `${failed.length}/${analyticsResults.length} vidéos sans analytics`,
+                  detail: failed[0].error || '',
+                })
+              }
+
+              if (!revenueAvailable) {
+                results.monetaryEnabled = false
+                results.warnings.push({
+                  channel: chName,
+                  reason: 'Revenus non disponibles pour cette chaîne',
+                  detail: 'Scope monétaire non autorisé ou propriété restreinte',
+                })
+              }
             }
           }
+        } catch (e: any) {
+          results.errors.push(`Analytics (${chName}): ${e.message}`)
         }
-      } catch (e: any) {
-        results.errors.push(`Analytics (${chName}): ${e.message}`)
       }
 
       // STEP 3: Playlists

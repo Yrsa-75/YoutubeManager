@@ -8,14 +8,13 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-// GET: list all channels the current user has access to (owner or operator)
+// GET: list all channels the current user has access to (owner, operator, viewer, viewer_limited)
 export async function GET() {
   const session = await getServerSession(authOptions)
   if (!session?.userId) return NextResponse.json({ channels: [] })
 
   const userId = session.userId
 
-  // 1. Get channel_ids the user has access to (via channel_access)
   const { data: accesses } = await supabase
     .from('channel_access')
     .select('channel_id, role, is_selected, granted_by')
@@ -32,7 +31,6 @@ export async function GET() {
     return NextResponse.json({ channels: data || [] })
   }
 
-  // 2. Fetch the actual channel records
   const channelIds = accesses.map(a => a.channel_id)
   const { data: channels, error } = await supabase
     .from('channels')
@@ -42,15 +40,13 @@ export async function GET() {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // 3. DÉDUPLICATION : garder une seule ligne par channel_id
-  // Priorité : la ligne où user_id == owner_user_id (le vrai propriétaire en base)
+  // Déduplication par channel_id
   const dedupedMap = new Map<string, any>()
   for (const ch of channels || []) {
     const existing = dedupedMap.get(ch.channel_id)
     if (!existing) {
       dedupedMap.set(ch.channel_id, ch)
     } else {
-      // Si la nouvelle ligne a owner_user_id === user_id, elle est prioritaire
       const newIsCanonical = ch.owner_user_id && ch.owner_user_id === ch.user_id
       const existingIsCanonical = existing.owner_user_id && existing.owner_user_id === existing.user_id
       if (newIsCanonical && !existingIsCanonical) {
@@ -60,7 +56,7 @@ export async function GET() {
   }
   const uniqueChannels = Array.from(dedupedMap.values())
 
-  // 4. Enrich each channel with access metadata (role, is_selected from channel_access)
+  // Enrich with access metadata + analytics_available flag
   const enriched = uniqueChannels.map(ch => {
     const acc = accesses.find(a => a.channel_id === ch.channel_id)
     return {
@@ -68,6 +64,11 @@ export async function GET() {
       is_selected: acc?.is_selected ?? ch.is_selected,
       access_role: acc?.role || 'owner',
       granted_by: acc?.granted_by || null,
+      // Si la colonne analytics_available est null/undefined (legacy), on déduit du rôle :
+      // owner/operator → true, viewer_limited → false
+      analytics_available: ch.analytics_available !== undefined && ch.analytics_available !== null
+        ? ch.analytics_available
+        : acc?.role !== 'viewer_limited',
     }
   })
 
@@ -91,7 +92,7 @@ export async function POST() {
 
     const items = data.items || []
     for (const ch of items) {
-      // Upsert dans channels
+      // Upsert dans channels (owner direct → analytics disponible)
       await supabase.from('channels').upsert({
         user_id: session.userId,
         channel_id: ch.id,
@@ -102,6 +103,7 @@ export async function POST() {
         is_selected: true,
         owner_user_id: session.userId,
         synced_at: new Date().toISOString(),
+        analytics_available: true,
       }, { onConflict: 'user_id,channel_id' })
 
       // Assurer l'entrée channel_access role=owner
@@ -120,7 +122,7 @@ export async function POST() {
   }
 }
 
-// PUT: toggle is_selected (updates channel_access AND legacy channels for transition safety)
+// PUT: toggle is_selected
 export async function PUT(req: NextRequest) {
   const session = await getServerSession(authOptions)
   if (!session?.userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -128,14 +130,12 @@ export async function PUT(req: NextRequest) {
   const { channelId, isSelected } = await req.json()
   const userId = session.userId
 
-  // Nouveau : mettre à jour channel_access
   const { error: accessError } = await supabase
     .from('channel_access')
     .update({ is_selected: isSelected })
     .eq('user_id', userId)
     .eq('channel_id', channelId)
 
-  // Legacy : continuer à mettre à jour channels.is_selected pour compat
   const { error: legacyError } = await supabase
     .from('channels')
     .update({ is_selected: isSelected })

@@ -184,7 +184,7 @@ export default function VideoTable({ searchQuery }: Props) {
   async function fetchVideos() {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ search: searchQuery, sortBy, sortDir, status: statusFilter, limit: '200' })
+      const params = new URLSearchParams({ search: searchQuery, sortBy, sortDir, status: statusFilter, limit: '1000' })
       const res = await fetch('/api/youtube/videos?' + params)
       const data = await res.json()
       setVideos(data.videos || [])

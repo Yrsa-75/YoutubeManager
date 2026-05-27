@@ -5,6 +5,9 @@ export interface Video {
   description: string
   thumbnail_url: string
   published_at: string
+  // Date de mise en ligne programmée (YouTube status.publishAt).
+  // Renseignée uniquement pour les vidéos programmées (privées avec date de sortie). NULL sinon.
+  scheduled_publish_at?: string | null
   status: 'public' | 'private' | 'unlisted'
   duration: string
   tags: string[]

@@ -322,6 +322,9 @@ export async function POST() {
             title: v.snippet?.title, description: v.snippet?.description,
             thumbnail_url: v.snippet?.thumbnails?.medium?.url,
             published_at: v.snippet?.publishedAt,
+            // Date de mise en ligne programmée (uniquement pour les vidéos privées programmées).
+            // status.publishAt est déjà inclus car on demande part=...,status sur videos.list
+            scheduled_publish_at: v.status?.publishAt || null,
             status: v.status?.privacyStatus,
             duration: v.contentDetails?.duration,
             tags: v.snippet?.tags || [], category_id: v.snippet?.categoryId,

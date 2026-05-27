@@ -34,6 +34,7 @@ const DEFAULT_COLUMNS = [
   { key: 'title', label: 'Titre', enabled: true },
   { key: 'status', label: 'Statut', enabled: true },
   { key: 'published_at', label: 'Upload', enabled: true },
+  { key: 'publication', label: 'Publication', enabled: true },
   { key: 'view_count', label: 'Vues', enabled: true },
   { key: 'like_count', label: 'Likes', enabled: true },
   { key: 'comment_count', label: 'Commentaires', enabled: true },
@@ -218,6 +219,9 @@ export default function VideoTable({ searchQuery }: Props) {
           'Titre': v.title,
           'Statut': v.status,
           'Date upload': v.published_at ? new Date(v.published_at).toLocaleDateString('fr-FR') : '',
+          'Publication': v.scheduled_publish_at
+            ? 'Programmée : ' + new Date(v.scheduled_publish_at).toLocaleString('fr-FR')
+            : (v.published_at ? new Date(v.published_at).toLocaleDateString('fr-FR') : ''),
           'Vues': v.view_count,
           'Likes': v.like_count,
           'Commentaires': v.comment_count,
@@ -307,7 +311,7 @@ export default function VideoTable({ searchQuery }: Props) {
 
   const activeColumns = columns.filter(c => c.enabled)
   const colorRuleFilters = colorRules.filter(r => r.enabled).slice(0, 4)
-  const nonSortable = ['thumbnail_url', 'tags', 'playlists']
+  const nonSortable = ['thumbnail_url', 'tags', 'playlists', 'publication']
 
   // Cellule générique pour les fields analytics indisponibles (mode Manager limité)
   function limitedAnalyticsCell() {
@@ -344,6 +348,31 @@ export default function VideoTable({ searchQuery }: Props) {
       }
       case 'published_at':
         return <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{formatDate(video.published_at)}</span>
+      case 'publication': {
+        // Colonne intelligente :
+        //  - vidéo programmée (scheduled_publish_at présent) → date de sortie prévue + badge ⏱
+        //  - sinon → date de publication réelle (published_at)
+        const scheduled = video.scheduled_publish_at
+        if (scheduled) {
+          let tooltip = 'Mise en ligne programmée'
+          try {
+            tooltip = 'Mise en ligne programmée le ' + new Date(scheduled).toLocaleString('fr-FR', {
+              day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+            })
+          } catch {}
+          return (
+            <span
+              className="text-xs inline-flex items-center gap-1 cursor-help"
+              style={{ color: '#f59e0b' }}
+              title={tooltip}
+            >
+              {formatDate(scheduled)}
+              <span className="text-[10px]">⏱</span>
+            </span>
+          )
+        }
+        return <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{formatDate(video.published_at)}</span>
+      }
       case 'view_count':
         return <span className="font-mono text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{formatNumber(video.view_count)}</span>
       case 'like_count':

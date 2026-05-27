@@ -129,6 +129,26 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
             <a href={`https://youtube.com/watch?v=${video.youtube_id}`} target="_blank" rel="noreferrer"
               className="underline" style={{ color: 'var(--accent-red)' }}>YouTube</a>
           </div>
+          {video.scheduled_publish_at && (
+            <div
+              className="mt-2 inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium"
+              style={{ background: 'rgba(245,158,11,0.12)', color: '#f59e0b' }}
+            >
+              <span>⏱</span>
+              <span>
+                Mise en ligne programmée :{' '}
+                {(() => {
+                  try {
+                    return new Date(video.scheduled_publish_at).toLocaleString('fr-FR', {
+                      day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                    })
+                  } catch {
+                    return formatDate(video.scheduled_publish_at)
+                  }
+                })()}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Encart "accès limité" — affiché uniquement si la chaîne est en mode Manager limité */}

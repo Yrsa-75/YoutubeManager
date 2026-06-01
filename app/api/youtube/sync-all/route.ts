@@ -292,15 +292,18 @@ async function fetchAnalytics(
   if (bulk.ok && bulk.rowsByVideo) {
     const revenue = bulk.revenueAvailable
     const revMap = bulk.revenueByVideo
-    const results: AnalyticsResult[] = videoIds.map(vid => {
+    // On ne renvoie QUE les videos reellement couvertes par le rapport groupe
+    // (le rapport plafonne a ~155 videos actives). Les autres ne sont PAS
+    // marquees ici : la synchro par lots (cron /api/youtube/analytics-batch)
+    // les traitera une par une. Sans ca, on estamperait analytics_synced_at avec
+    // des zeros et le cron les considererait a tort comme deja a jour.
+    const results: AnalyticsResult[] = []
+    for (const vid of videoIds) {
       const row = bulk.rowsByVideo!.get(vid)
+      if (!row) continue
       const rev = revenue ? (revMap?.get(vid) ?? 0) : null
-      if (!row) {
-        // Video sans donnees de base sur la periode -> tout a 0 (pas une erreur)
-        return { videoId: vid, ok: true, data: { views: 0, minutesWatched: 0, avgDuration: 0, avgPercentage: 0, subsGained: 0, subsLost: 0, shares: 0, revenue: rev } }
-      }
       // core row = [video, views, mw, avd, avp, sg, sl, shares] ; revenus fusionnes a part
-      return { videoId: vid, ok: true, data: {
+      results.push({ videoId: vid, ok: true, data: {
         views: row[1] || 0,
         minutesWatched: row[2] || 0,
         avgDuration: row[3] || 0,
@@ -309,8 +312,8 @@ async function fetchAnalytics(
         subsLost: row[6] || 0,
         shares: row[7] || 0,
         revenue: rev,
-      } }
-    })
+      } })
+    }
     return { results, revenueAvailable: revenue }
   }
 

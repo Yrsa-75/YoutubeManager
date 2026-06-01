@@ -142,15 +142,16 @@ async function fetchChannelAnalyticsBulk(
   channelIdsParam: string,
   startDate: string,
   endDate: string,
-  tryRevenue: boolean
+  tryRevenue: boolean,
+  totalVideos: number
 ): Promise<{ ok: boolean; status?: number; error?: string; rowsByVideo?: Map<string, any[]>; revenueByVideo?: Map<string, number>; revenueAvailable: boolean }> {
   const coreMetrics = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares'
 
-  async function pageReport(metrics: string, sort: string, startIndex: number) {
+  async function pageReport(metrics: string, sort: string, startIndex: number, sDate: string, eDate: string) {
     const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
     url.searchParams.set('ids', channelIdsParam)
-    url.searchParams.set('startDate', startDate)
-    url.searchParams.set('endDate', endDate)
+    url.searchParams.set('startDate', sDate)
+    url.searchParams.set('endDate', eDate)
     url.searchParams.set('metrics', metrics)
     url.searchParams.set('dimensions', 'video')
     url.searchParams.set('sort', sort)
@@ -162,12 +163,12 @@ async function fetchChannelAnalyticsBulk(
     return { ok: true as const, rows: (d.rows || []) as any[] }
   }
 
-  // Pagine un rapport complet (toutes les pages) ou renvoie l'erreur
-  async function paginate(metrics: string, sort: string) {
+  // Pagine un rapport complet (toutes les pages) sur une plage de dates donnee
+  async function paginate(metrics: string, sort: string, sDate: string, eDate: string) {
     const all: any[] = []
     let startIndex = 1
     while (true) {
-      const res = await pageReport(metrics, sort, startIndex)
+      const res = await pageReport(metrics, sort, startIndex, sDate, eDate)
       if (!res.ok) return { ok: false as const, status: res.status, errorMsg: res.errorMsg }
       all.push(...res.rows)
       if (res.rows.length < 200) break
@@ -177,23 +178,91 @@ async function fetchChannelAnalyticsBulk(
     return { ok: true as const, rows: all }
   }
 
-  // PASSE 1 - metriques de base SANS revenus : couvre TOUTES les videos avec du trafic.
-  // (Inclure estimatedRevenue dans la meme requete restreint la reponse aux seules
-  //  videos monetisees -> c'est ce qui limitait a ~155 videos.)
-  const core = await paginate(coreMetrics, '-estimatedMinutesWatched')
-  if (!core.ok) {
-    console.error('[bulk] echec passe core:', core.status, core.errorMsg)
-    return { ok: false, status: core.status, error: core.errorMsg, revenueAvailable: false }
+  // Decoupe [startDate, endDate] en fenetres de N mois (3 = trimestres).
+  // Le rapport dimensions=video plafonne le nombre de videos renvoyees par requete
+  // (~155 sur Family). En interrogeant trimestre par trimestre (~50 videos chacun,
+  // bien sous le plafond), on recupere TOUT le catalogue, puis on agrege.
+  function buildChunks(sDate: string, eDate: string, stepMonths: number): Array<[string, string]> {
+    const ymd = (d: Date) => d.toISOString().slice(0, 10)
+    const chunks: Array<[string, string]> = []
+    let s = new Date(sDate + 'T00:00:00Z')
+    const end = new Date(eDate + 'T00:00:00Z')
+    let guard = 0
+    while (s <= end && guard++ < 400) {
+      const next = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + stepMonths, 1))
+      let e = new Date(next.getTime() - 86400000) // veille du debut de la fenetre suivante
+      if (e > end) e = end
+      chunks.push([ymd(s), ymd(e)])
+      s = next
+    }
+    return chunks
+  }
+
+  // PASSE 1 - metriques de base, TRIMESTRE PAR TRIMESTRE pour contourner le plafond
+  // de l'API. On additionne les metriques cumulables (vues, temps regarde, abonnes,
+  // partages) et on recalcule les MOYENNES (visionnage moyen, % regarde) en moyenne
+  // ponderee par les vues -> resultat identique a une requete pleine periode, mais
+  // sur TOUTES les videos du catalogue.
+  // Taille de tranche ADAPTATIVE : on vise ~45 videos par tranche (sous le plafond
+  // ~155, avec marge). Une chaine tres active (Family ~77 videos/mois) -> tranches
+  // mensuelles ; une petite chaine -> tranches plus larges (moins de requetes).
+  const spanMonths = Math.max(
+    1,
+    (new Date(endDate + 'T00:00:00Z').getUTCFullYear() - new Date(startDate + 'T00:00:00Z').getUTCFullYear()) * 12
+      + (new Date(endDate + 'T00:00:00Z').getUTCMonth() - new Date(startDate + 'T00:00:00Z').getUTCMonth()) + 1
+  )
+  const perMonth = totalVideos / spanMonths
+  const stepMonths = perMonth <= 0 ? 12 : Math.max(1, Math.min(12, Math.floor(45 / perMonth)))
+  const chunks = buildChunks(startDate, endDate, stepMonths)
+  console.log('[bulk] cadence=', perMonth.toFixed(1), 'videos/mois -> tranches de', stepMonths, 'mois (', chunks.length, 'tranches)')
+  type Acc = { views: number; mw: number; sg: number; sl: number; sh: number; wDur: number; wPct: number }
+  const acc = new Map<string, Acc>()
+  let firstFailStatus: number | undefined
+  let firstFailMsg: string | undefined
+  let okChunks = 0
+  for (const [s, e] of chunks) {
+    const res = await paginate(coreMetrics, '-estimatedMinutesWatched', s, e)
+    if (!res.ok) {
+      if (acc.size === 0 && firstFailStatus === undefined) { firstFailStatus = res.status; firstFailMsg = res.errorMsg }
+      console.error('[bulk] trimestre', s, '->', e, 'echec:', res.status, res.errorMsg)
+      continue
+    }
+    okChunks++
+    for (const row of res.rows) {
+      const vid = row[0] as string
+      const views = Number(row[1]) || 0
+      const a = acc.get(vid) || { views: 0, mw: 0, sg: 0, sl: 0, sh: 0, wDur: 0, wPct: 0 }
+      a.views += views
+      a.mw += Number(row[2]) || 0
+      a.wDur += (Number(row[3]) || 0) * views   // visionnage moyen, pondere par les vues
+      a.wPct += (Number(row[4]) || 0) * views   // % regarde, pondere par les vues
+      a.sg += Number(row[5]) || 0
+      a.sl += Number(row[6]) || 0
+      a.sh += Number(row[7]) || 0
+      acc.set(vid, a)
+    }
+  }
+  // Rien recupere ET une erreur rencontree -> on la remonte (permet le fallback
+  // "une requete par video" pour les petites chaines en erreur 400).
+  if (acc.size === 0 && firstFailStatus !== undefined) {
+    console.error('[bulk] aucune donnee, echec global:', firstFailStatus, firstFailMsg)
+    return { ok: false, status: firstFailStatus, error: firstFailMsg, revenueAvailable: false }
   }
   const rowsByVideo = new Map<string, any[]>()
-  for (const row of core.rows) rowsByVideo.set(row[0], row) // [video, views, mw, avd, avp, sg, sl, shares]
+  for (const [vid, a] of acc) {
+    const avd = a.views > 0 ? a.wDur / a.views : 0
+    const avp = a.views > 0 ? a.wPct / a.views : 0
+    // format de ligne conserve : [video, views, mw, avd, avp, sg, sl, shares]
+    rowsByVideo.set(vid, [vid, a.views, a.mw, avd, avp, a.sg, a.sl, a.sh])
+  }
+  console.log('[bulk] trimestres OK=', okChunks, '/', chunks.length, ' videos couvertes=', rowsByVideo.size)
 
   // PASSE 2 - revenus seuls (videos monetisees uniquement). Optionnelle : si le scope
   // monetaire n'est pas autorise, on continue sans revenus (le reste est deja recupere).
   const revenueByVideo = new Map<string, number>()
   let revenueAvailable = false
   if (tryRevenue) {
-    const rev = await paginate('views,estimatedRevenue', '-estimatedRevenue')
+    const rev = await paginate('views,estimatedRevenue', '-estimatedRevenue', startDate, endDate)
     if (rev.ok) {
       revenueAvailable = true
       for (const row of rev.rows) revenueByVideo.set(row[0], Number(row[2]) || 0) // [video, views, estimatedRevenue]
@@ -218,7 +287,7 @@ async function fetchAnalytics(
   endDate: string,
   tryRevenue: boolean
 ): Promise<{ results: AnalyticsResult[]; revenueAvailable: boolean }> {
-  const bulk = await fetchChannelAnalyticsBulk(token, channelIdsParam, startDate, endDate, tryRevenue)
+  const bulk = await fetchChannelAnalyticsBulk(token, channelIdsParam, startDate, endDate, tryRevenue, videoIds.length)
 
   if (bulk.ok && bulk.rowsByVideo) {
     const revenue = bulk.revenueAvailable

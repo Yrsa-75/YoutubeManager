@@ -167,12 +167,15 @@ async function fetchChannelAnalyticsBulk(
 
   while (true) {
     let res = await page(revenue ? metricsWithRevenue : metricsNoRevenue, startIndex)
-    // Pas de droits revenus -> on repasse sans revenus (sur la meme page)
-    if (!res.ok && revenue && (res.errorMsg?.toLowerCase().includes('monetary') || res.errorMsg?.toLowerCase().includes('revenue'))) {
+    // estimatedRevenue par video est souvent refuse hors Content Owner. En cas d'echec
+    // AVEC revenus, on retire les revenus et on reessaie (quel que soit le message d'erreur).
+    if (!res.ok && revenue) {
+      console.error('[bulk] echec avec revenus -> retry sans revenus:', res.status, res.errorMsg)
       revenue = false
       res = await page(metricsNoRevenue, startIndex)
     }
     if (!res.ok) {
+      console.error('[bulk] echec definitif:', res.status, res.errorMsg)
       return { ok: false, status: res.status, error: res.errorMsg, revenueAvailable: false }
     }
     for (const row of res.rows) {
@@ -184,6 +187,7 @@ async function fetchChannelAnalyticsBulk(
     if (startIndex > 10000) break // garde-fou anti-boucle
   }
 
+  console.log('[bulk] OK:', rowsByVideo.size, 'videos avec donnees, revenus=', revenue)
   return { ok: true, rowsByVideo, revenueAvailable: revenue }
 }
 
@@ -223,10 +227,16 @@ async function fetchAnalytics(
     return { results, revenueAvailable: revenue }
   }
 
-  // Echec groupe : 400 => fallback par video ; sinon on remonte l'erreur
-  if (bulk.status === 400) {
+  // Echec groupe :
+  //   - 400 sur PETITE chaine (<=300 videos) => fallback "une par video" (rapide, sans risque de timeout)
+  //   - sinon (grosse chaine ou autre erreur) => on remonte l'erreur SANS fallback
+  //     (un fallback par video sur une grosse chaine = timeout 60s garanti)
+  if (bulk.status === 400 && videoIds.length <= 300) {
+    console.error('[analytics] bulk 400 sur petite chaine -> fallback par video')
     return await fetchAllAnalytics(token, channelIdsParam, videoIds, startDate, endDate, tryRevenue, 20)
   }
+
+  console.error('[analytics] echec groupe, pas de fallback (', videoIds.length, 'videos):', bulk.status, bulk.error)
 
   return {
     results: [{ videoId: videoIds[0], ok: false, status: bulk.status, error: bulk.error }],

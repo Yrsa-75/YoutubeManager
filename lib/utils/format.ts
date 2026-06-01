@@ -9,7 +9,14 @@ export function formatNumber(n: number): string {
 
 export function formatDate(dateStr: string): string {
   try {
-    return formatDistanceToNow(parseISO(dateStr), { addSuffix: true, locale: fr })
+    const date = parseISO(dateStr)
+    const diffDays = Math.abs(Date.now() - date.getTime()) / (1000 * 60 * 60 * 24)
+    // Au-dela de 7 jours (passe ou futur) : date reelle JJ/MM/AAAA.
+    // En deca : format relatif ("il y a 3 jours", "dans 2 jours").
+    if (diffDays > 7) {
+      return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    }
+    return formatDistanceToNow(date, { addSuffix: true, locale: fr })
   } catch {
     return dateStr
   }

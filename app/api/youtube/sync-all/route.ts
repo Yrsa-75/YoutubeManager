@@ -423,6 +423,13 @@ export async function POST() {
           npt = d.nextPageToken
         } while (npt)
 
+        // Dedup : la playlist d'uploads peut renvoyer des doublons (re-uploads,
+        // chevauchement de pagination). Sans ca, l'upsert Postgres echoue avec
+        // "ON CONFLICT DO UPDATE cannot affect row a second time". On deduplique
+        // ici une bonne fois : ca protege l'ecriture des videos ET de l'analytics
+        // (les deux derivent de cette liste).
+        videoIds = Array.from(new Set(videoIds))
+
         if (videoIds.length > 0) {
           const allVids: any[] = []
           for (let i = 0; i < videoIds.length; i += 50) {

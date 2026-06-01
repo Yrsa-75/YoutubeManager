@@ -366,7 +366,10 @@ export async function POST() {
               : '2005-01-01'
             const today = new Date().toISOString().split('T')[0]
 
-            const idsParam = isPrimary ? 'channel==MINE' : `channel==${chId}`
+            // Si on dispose d'un token DELEGUE propre a cette chaine (channel_tokens),
+            // ce token est rattache a la chaine -> on interroge channel==MINE (robuste
+            // quelle que soit la subtilite cote YouTube). Sinon, fallback channel==<id>.
+            const idsParam = (isPrimary || tokenSource === 'owner_delegated') ? 'channel==MINE' : `channel==${chId}`
 
             const { results: analyticsResults, revenueAvailable } = await fetchAllAnalytics(
               token, idsParam, videoIds, oldest, today, true, 20

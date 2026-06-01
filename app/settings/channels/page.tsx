@@ -471,25 +471,21 @@ function AddChannelModal({ onClose }: { onClose: () => void }) {
 }
 
 function OwnerConnectFlow({ onClose, onBack }: { onClose: () => void; onBack: () => void }) {
-  const [busy, setBusy] = useState(false)
-  async function sync() {
-    setBusy(true)
-    try {
-      const r = await fetch('/api/youtube/channels', { method: 'POST' })
-      const d = await r.json()
-      if (r.ok) { toast.success(`${d.count || 0} chaîne(s) importée(s)`); onClose() }
-      else toast.error(d.error || 'Erreur')
-    } finally { setBusy(false) }
+  function connect() {
+    // Redirige vers le flux OAuth dedie. L'utilisateur choisit le compte Google qui
+    // POSSEDE la chaine, autorise l'acces Analytics, et au retour le token est
+    // enregistre dans channel_tokens (la table lue par la synchro Analytics).
+    window.location.href = '/api/youtube/connect-channel'
   }
   return (
     <div className="space-y-3">
       <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-        Cliquer sur « Importer » va récupérer toutes les chaînes Google auxquelles tu es connecté(e). Si tu veux ajouter une autre chaîne, reconnecte-toi d'abord avec le compte Google qui la possède.
+        Tu vas être redirigé(e) vers Google. Choisis le compte qui possède la chaîne à connecter, puis autorise tous les accès demandés. L’accès Analytics et les revenus seront disponibles au retour.
       </p>
       <div className="flex gap-2 mt-4">
         <button onClick={onBack} className="px-4 py-2 rounded text-sm" style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}>Retour</button>
-        <button onClick={sync} disabled={busy} className="px-4 py-2 rounded text-sm font-medium" style={{ background: 'var(--accent)', color: 'white' }}>
-          {busy ? 'Import...' : 'Importer mes chaînes'}
+        <button onClick={connect} className="px-4 py-2 rounded text-sm font-medium" style={{ background: 'var(--accent)', color: 'white' }}>
+          Connecter via Google
         </button>
       </div>
     </div>

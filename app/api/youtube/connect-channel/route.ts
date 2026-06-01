@@ -17,9 +17,17 @@ export async function GET() {
     scope: [
       'https://www.googleapis.com/auth/youtube.readonly',
       'https://www.googleapis.com/auth/yt-analytics.readonly',
+      'https://www.googleapis.com/auth/yt-analytics-monetary.readonly',
     ].join(' '),
     access_type: 'offline',
-    prompt: 'select_account',
+    // 'consent'        -> Google renvoie TOUJOURS un refresh_token (sinon l'acces meurt apres 1h
+    //                     sans possibilite de renouvellement automatique).
+    // 'select_account' -> l'utilisateur choisit explicitement le compte / la chaine de marque
+    //                     qui POSSEDE la chaine a connecter (ex: selectionner Family et non D&E).
+    //                     Indispensable quand un meme compte Google pilote plusieurs chaines :
+    //                     le token produit sera rattache a la chaine selectionnee.
+    prompt: 'consent select_account',
+    include_granted_scopes: 'true',
     state: session.userId,
   })
 

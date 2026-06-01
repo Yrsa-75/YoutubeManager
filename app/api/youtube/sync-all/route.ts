@@ -3,7 +3,9 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/options'
 import { createClient } from '@supabase/supabase-js'
 
-export const maxDuration = 60
+// Plan Vercel Pro : fonctions jusqu'a 300s. Une synchro complete d'une grosse
+// chaine (metadonnees + playlists + analytics) depasse les 60s par defaut.
+export const maxDuration = 300
 
 async function refreshChannelToken(channel: any, supabase: any) {
   if (!channel.refresh_token) return channel.access_token

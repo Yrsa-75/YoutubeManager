@@ -143,18 +143,17 @@ async function fetchChannelAnalyticsBulk(
   startDate: string,
   endDate: string,
   tryRevenue: boolean
-): Promise<{ ok: boolean; status?: number; error?: string; rowsByVideo?: Map<string, any[]>; revenueAvailable: boolean }> {
-  const metricsWithRevenue = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares,estimatedRevenue'
-  const metricsNoRevenue = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares'
+): Promise<{ ok: boolean; status?: number; error?: string; rowsByVideo?: Map<string, any[]>; revenueByVideo?: Map<string, number>; revenueAvailable: boolean }> {
+  const coreMetrics = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares'
 
-  async function page(metrics: string, startIndex: number) {
+  async function pageReport(metrics: string, sort: string, startIndex: number) {
     const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
     url.searchParams.set('ids', channelIdsParam)
     url.searchParams.set('startDate', startDate)
     url.searchParams.set('endDate', endDate)
     url.searchParams.set('metrics', metrics)
     url.searchParams.set('dimensions', 'video')
-    url.searchParams.set('sort', '-estimatedMinutesWatched')
+    url.searchParams.set('sort', sort)
     url.searchParams.set('maxResults', '200')
     url.searchParams.set('startIndex', String(startIndex))
     const r = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
@@ -163,34 +162,48 @@ async function fetchChannelAnalyticsBulk(
     return { ok: true as const, rows: (d.rows || []) as any[] }
   }
 
-  let revenue = tryRevenue
-  const rowsByVideo = new Map<string, any[]>()
-  let startIndex = 1
-
-  while (true) {
-    let res = await page(revenue ? metricsWithRevenue : metricsNoRevenue, startIndex)
-    // estimatedRevenue par video est souvent refuse hors Content Owner. En cas d'echec
-    // AVEC revenus, on retire les revenus et on reessaie (quel que soit le message d'erreur).
-    if (!res.ok && revenue) {
-      console.error('[bulk] echec avec revenus -> retry sans revenus:', res.status, res.errorMsg)
-      revenue = false
-      res = await page(metricsNoRevenue, startIndex)
+  // Pagine un rapport complet (toutes les pages) ou renvoie l'erreur
+  async function paginate(metrics: string, sort: string) {
+    const all: any[] = []
+    let startIndex = 1
+    while (true) {
+      const res = await pageReport(metrics, sort, startIndex)
+      if (!res.ok) return { ok: false as const, status: res.status, errorMsg: res.errorMsg }
+      all.push(...res.rows)
+      if (res.rows.length < 200) break
+      startIndex += 200
+      if (startIndex > 20000) break // garde-fou anti-boucle
     }
-    if (!res.ok) {
-      console.error('[bulk] echec definitif:', res.status, res.errorMsg)
-      return { ok: false, status: res.status, error: res.errorMsg, revenueAvailable: false }
-    }
-    for (const row of res.rows) {
-      // dimensions=video -> row[0] = videoId, puis les metriques dans l'ordre demande
-      rowsByVideo.set(row[0], row)
-    }
-    if (res.rows.length < 200) break
-    startIndex += 200
-    if (startIndex > 10000) break // garde-fou anti-boucle
+    return { ok: true as const, rows: all }
   }
 
-  console.log('[bulk] OK:', rowsByVideo.size, 'videos avec donnees, revenus=', revenue)
-  return { ok: true, rowsByVideo, revenueAvailable: revenue }
+  // PASSE 1 - metriques de base SANS revenus : couvre TOUTES les videos avec du trafic.
+  // (Inclure estimatedRevenue dans la meme requete restreint la reponse aux seules
+  //  videos monetisees -> c'est ce qui limitait a ~155 videos.)
+  const core = await paginate(coreMetrics, '-estimatedMinutesWatched')
+  if (!core.ok) {
+    console.error('[bulk] echec passe core:', core.status, core.errorMsg)
+    return { ok: false, status: core.status, error: core.errorMsg, revenueAvailable: false }
+  }
+  const rowsByVideo = new Map<string, any[]>()
+  for (const row of core.rows) rowsByVideo.set(row[0], row) // [video, views, mw, avd, avp, sg, sl, shares]
+
+  // PASSE 2 - revenus seuls (videos monetisees uniquement). Optionnelle : si le scope
+  // monetaire n'est pas autorise, on continue sans revenus (le reste est deja recupere).
+  const revenueByVideo = new Map<string, number>()
+  let revenueAvailable = false
+  if (tryRevenue) {
+    const rev = await paginate('views,estimatedRevenue', '-estimatedRevenue')
+    if (rev.ok) {
+      revenueAvailable = true
+      for (const row of rev.rows) revenueByVideo.set(row[0], Number(row[2]) || 0) // [video, views, estimatedRevenue]
+    } else {
+      console.error('[bulk] revenus indisponibles (on continue sans):', rev.status, rev.errorMsg)
+    }
+  }
+
+  console.log('[bulk] OK: core=', rowsByVideo.size, 'videos, revenus=', revenueByVideo.size, 'videos')
+  return { ok: true, rowsByVideo, revenueByVideo, revenueAvailable }
 }
 
 // Strategie unifiee : on tente d'abord la requete groupee (rapide). Si la chaine
@@ -209,12 +222,15 @@ async function fetchAnalytics(
 
   if (bulk.ok && bulk.rowsByVideo) {
     const revenue = bulk.revenueAvailable
+    const revMap = bulk.revenueByVideo
     const results: AnalyticsResult[] = videoIds.map(vid => {
       const row = bulk.rowsByVideo!.get(vid)
+      const rev = revenue ? (revMap?.get(vid) ?? 0) : null
       if (!row) {
-        // Video sans donnees sur la periode -> tout a 0 (pas une erreur)
-        return { videoId: vid, ok: true, data: { views: 0, minutesWatched: 0, avgDuration: 0, avgPercentage: 0, subsGained: 0, subsLost: 0, shares: 0, revenue: revenue ? 0 : null } }
+        // Video sans donnees de base sur la periode -> tout a 0 (pas une erreur)
+        return { videoId: vid, ok: true, data: { views: 0, minutesWatched: 0, avgDuration: 0, avgPercentage: 0, subsGained: 0, subsLost: 0, shares: 0, revenue: rev } }
       }
+      // core row = [video, views, mw, avd, avp, sg, sl, shares] ; revenus fusionnes a part
       return { videoId: vid, ok: true, data: {
         views: row[1] || 0,
         minutesWatched: row[2] || 0,
@@ -223,7 +239,7 @@ async function fetchAnalytics(
         subsGained: row[5] || 0,
         subsLost: row[6] || 0,
         shares: row[7] || 0,
-        revenue: revenue ? (row[8] || 0) : null,
+        revenue: rev,
       } }
     })
     return { results, revenueAvailable: revenue }

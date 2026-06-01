@@ -74,7 +74,11 @@ export async function GET(req: NextRequest) {
     }
     if (status) query = query.eq('status', status)
 
-    query = query.order(sortBy, { ascending: sortDir === 'asc' })
+    // La colonne "Date de publication" (clé 'publication') est calculee :
+    // date programmee si presente, sinon date reelle. On trie sur la colonne
+    // generee publication_date = COALESCE(scheduled_publish_at, published_at).
+    const sortColumn = sortBy === 'publication' ? 'publication_date' : sortBy
+    query = query.order(sortColumn, { ascending: sortDir === 'asc' })
     query = query.range(offset, offset + limit - 1)
 
     const { data: videos, error, count } = await query

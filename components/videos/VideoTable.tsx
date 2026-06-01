@@ -34,7 +34,7 @@ const DEFAULT_COLUMNS = [
   { key: 'title', label: 'Titre', enabled: true },
   { key: 'status', label: 'Statut', enabled: true },
   { key: 'published_at', label: 'Upload', enabled: true },
-  { key: 'publication', label: 'Publication', enabled: true },
+  { key: 'publication', label: 'Date de publication', enabled: true },
   { key: 'view_count', label: 'Vues', enabled: true },
   { key: 'like_count', label: 'Likes', enabled: true },
   { key: 'comment_count', label: 'Commentaires', enabled: true },
@@ -130,7 +130,7 @@ export default function VideoTable({ searchQuery }: Props) {
         const persistedMap = new Map(data.columns.map((c: any) => [c.key, c]))
         const merged = [...data.columns.map((c: any) => {
           const def = DEFAULT_COLUMNS.find(d => d.key === c.key)
-          return { key: c.key, label: c.label || def?.label || c.key, enabled: c.enabled, width: c.width || def?.width }
+          return { key: c.key, label: def?.label || c.label || c.key, enabled: c.enabled, width: c.width || def?.width }
         })]
         // Add any new columns not in persisted config
         DEFAULT_COLUMNS.forEach(def => {
@@ -311,7 +311,7 @@ export default function VideoTable({ searchQuery }: Props) {
 
   const activeColumns = columns.filter(c => c.enabled)
   const colorRuleFilters = colorRules.filter(r => r.enabled).slice(0, 4)
-  const nonSortable = ['thumbnail_url', 'tags', 'playlists', 'publication']
+  const nonSortable = ['thumbnail_url', 'tags', 'playlists']
 
   // Cellule générique pour les fields analytics indisponibles (mode Manager limité)
   function limitedAnalyticsCell() {

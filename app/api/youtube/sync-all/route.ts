@@ -128,6 +128,112 @@ async function fetchAllAnalytics(
   return { results, revenueAvailable: tryRevenue }
 }
 
+// ---------------------------------------------------------------------------
+// BLOC B : requete GROUPEE (dimensions=video).
+// Recupere l'analytics de TOUTES les videos d'une chaine en quelques requetes
+// paginees (200 videos/page) au lieu d'une requete par video. Indispensable
+// pour les grosses chaines (ex: Family ~2400 videos) sinon timeout Vercel 60s.
+// Ne marche que si le token est proprietaire/gestionnaire de la chaine.
+// ---------------------------------------------------------------------------
+async function fetchChannelAnalyticsBulk(
+  token: string,
+  channelIdsParam: string,
+  startDate: string,
+  endDate: string,
+  tryRevenue: boolean
+): Promise<{ ok: boolean; status?: number; error?: string; rowsByVideo?: Map<string, any[]>; revenueAvailable: boolean }> {
+  const metricsWithRevenue = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares,estimatedRevenue'
+  const metricsNoRevenue = 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost,shares'
+
+  async function page(metrics: string, startIndex: number) {
+    const url = new URL('https://youtubeanalytics.googleapis.com/v2/reports')
+    url.searchParams.set('ids', channelIdsParam)
+    url.searchParams.set('startDate', startDate)
+    url.searchParams.set('endDate', endDate)
+    url.searchParams.set('metrics', metrics)
+    url.searchParams.set('dimensions', 'video')
+    url.searchParams.set('sort', '-estimatedMinutesWatched')
+    url.searchParams.set('maxResults', '200')
+    url.searchParams.set('startIndex', String(startIndex))
+    const r = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
+    const d = await r.json()
+    if (!r.ok) return { ok: false as const, status: r.status, errorMsg: d.error?.message || `HTTP ${r.status}` }
+    return { ok: true as const, rows: (d.rows || []) as any[] }
+  }
+
+  let revenue = tryRevenue
+  const rowsByVideo = new Map<string, any[]>()
+  let startIndex = 1
+
+  while (true) {
+    let res = await page(revenue ? metricsWithRevenue : metricsNoRevenue, startIndex)
+    // Pas de droits revenus -> on repasse sans revenus (sur la meme page)
+    if (!res.ok && revenue && (res.errorMsg?.toLowerCase().includes('monetary') || res.errorMsg?.toLowerCase().includes('revenue'))) {
+      revenue = false
+      res = await page(metricsNoRevenue, startIndex)
+    }
+    if (!res.ok) {
+      return { ok: false, status: res.status, error: res.errorMsg, revenueAvailable: false }
+    }
+    for (const row of res.rows) {
+      // dimensions=video -> row[0] = videoId, puis les metriques dans l'ordre demande
+      rowsByVideo.set(row[0], row)
+    }
+    if (res.rows.length < 200) break
+    startIndex += 200
+    if (startIndex > 10000) break // garde-fou anti-boucle
+  }
+
+  return { ok: true, rowsByVideo, revenueAvailable: revenue }
+}
+
+// Strategie unifiee : on tente d'abord la requete groupee (rapide). Si la chaine
+// ne supporte pas dimensions=video (erreur 400, typiquement les tres petites chaines),
+// on retombe sur l'ancienne methode "une requete par video". Toute autre erreur
+// (403, etc.) est remontee telle quelle pour le reporting.
+async function fetchAnalytics(
+  token: string,
+  channelIdsParam: string,
+  videoIds: string[],
+  startDate: string,
+  endDate: string,
+  tryRevenue: boolean
+): Promise<{ results: AnalyticsResult[]; revenueAvailable: boolean }> {
+  const bulk = await fetchChannelAnalyticsBulk(token, channelIdsParam, startDate, endDate, tryRevenue)
+
+  if (bulk.ok && bulk.rowsByVideo) {
+    const revenue = bulk.revenueAvailable
+    const results: AnalyticsResult[] = videoIds.map(vid => {
+      const row = bulk.rowsByVideo!.get(vid)
+      if (!row) {
+        // Video sans donnees sur la periode -> tout a 0 (pas une erreur)
+        return { videoId: vid, ok: true, data: { views: 0, minutesWatched: 0, avgDuration: 0, avgPercentage: 0, subsGained: 0, subsLost: 0, shares: 0, revenue: revenue ? 0 : null } }
+      }
+      return { videoId: vid, ok: true, data: {
+        views: row[1] || 0,
+        minutesWatched: row[2] || 0,
+        avgDuration: row[3] || 0,
+        avgPercentage: row[4] || 0,
+        subsGained: row[5] || 0,
+        subsLost: row[6] || 0,
+        shares: row[7] || 0,
+        revenue: revenue ? (row[8] || 0) : null,
+      } }
+    })
+    return { results, revenueAvailable: revenue }
+  }
+
+  // Echec groupe : 400 => fallback par video ; sinon on remonte l'erreur
+  if (bulk.status === 400) {
+    return await fetchAllAnalytics(token, channelIdsParam, videoIds, startDate, endDate, tryRevenue, 20)
+  }
+
+  return {
+    results: [{ videoId: videoIds[0], ok: false, status: bulk.status, error: bulk.error }],
+    revenueAvailable: false,
+  }
+}
+
 export async function POST() {
   const results: {
     videos: number
@@ -371,8 +477,8 @@ export async function POST() {
             // quelle que soit la subtilite cote YouTube). Sinon, fallback channel==<id>.
             const idsParam = (isPrimary || tokenSource === 'owner_delegated') ? 'channel==MINE' : `channel==${chId}`
 
-            const { results: analyticsResults, revenueAvailable } = await fetchAllAnalytics(
-              token, idsParam, videoIds, oldest, today, true, 20
+            const { results: analyticsResults, revenueAvailable } = await fetchAnalytics(
+              token, idsParam, videoIds, oldest, today, true
             )
 
             const successful = analyticsResults.filter(r => r.ok)

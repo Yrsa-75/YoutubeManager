@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { ChevronUp, ChevronDown, Sparkles, ExternalLink, Settings2, Download, Filter } from 'lucide-react'
 import type { Video, ColorRule } from '@/types'
 import { formatNumber, formatDate, formatDuration, formatViewDuration, formatPercentage, formatMinutes } from '@/lib/utils/format'
@@ -85,6 +85,9 @@ export default function VideoTable({ searchQuery }: Props) {
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilter[]>([])
   const [exporting, setExporting] = useState(false)
   const [columnsLoaded, setColumnsLoaded] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(500)
+  const didMountRef = useRef(false)
   // Map channel_id -> { analytics_available, title, access_role }
   const [channelsMap, setChannelsMap] = useState<Map<string, { analytics_available: boolean; title: string; access_role?: string }>>(new Map())
 
@@ -100,10 +103,20 @@ export default function VideoTable({ searchQuery }: Props) {
     return () => window.removeEventListener('refresh-videos', h)
   }, [])
 
+  // Règles de couleur : chargées une fois (indépendantes des filtres/pagination)
+  useEffect(() => { fetchColorRules() }, [])
+
+  // Changement de page → recharger cette page
+  useEffect(() => { fetchVideos() }, [page])
+
+  // Changement de tri / filtre / recherche / taille de page → revenir page 1
+  // (ou recharger directement si on est déjà page 1). Ignoré au tout premier rendu
+  // car l'effet ci-dessus a déjà chargé la page 1.
   useEffect(() => {
-    fetchVideos()
-    fetchColorRules()
-  }, [searchQuery, sortBy, sortDir, statusFilter])
+    if (!didMountRef.current) { didMountRef.current = true; return }
+    if (page !== 1) setPage(1)
+    else fetchVideos()
+  }, [searchQuery, sortBy, sortDir, statusFilter, pageSize])
 
   useEffect(() => {
     const handler = () => {
@@ -185,7 +198,7 @@ export default function VideoTable({ searchQuery }: Props) {
   async function fetchVideos() {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ search: searchQuery, sortBy, sortDir, status: statusFilter, limit: '1000' })
+      const params = new URLSearchParams({ search: searchQuery, sortBy, sortDir, status: statusFilter, page: String(page), limit: String(pageSize) })
       const res = await fetch('/api/youtube/videos?' + params)
       const data = await res.json()
       setVideos(data.videos || [])
@@ -207,11 +220,31 @@ export default function VideoTable({ searchQuery }: Props) {
     }
   }
 
+  // Récupère TOUTES les vidéos du filtre serveur courant (toutes les pages) pour l'export global.
+  async function fetchAllVideos(): Promise<Video[]> {
+    const all: Video[] = []
+    const EXPORT_LIMIT = 2000
+    let p = 1
+    while (p <= 100) {
+      const params = new URLSearchParams({ search: searchQuery, sortBy, sortDir, status: statusFilter, page: String(p), limit: String(EXPORT_LIMIT) })
+      const res = await fetch('/api/youtube/videos?' + params)
+      const data = await res.json()
+      const batch: Video[] = data.videos || []
+      all.push(...batch)
+      if (batch.length < EXPORT_LIMIT || all.length >= (data.total || 0)) break
+      p++
+    }
+    return all
+  }
+
   async function handleExport() {
     setExporting(true)
     try {
       const XLSX = await import('xlsx')
-      const exportData = filteredVideos.map(v => {
+      // Export GLOBAL : toutes les pages du filtre courant, puis mêmes couleurs + filtres client que l'affichage.
+      const allRaw = await fetchAllVideos()
+      const exportSource = applyClientFilters(allRaw.map(augmentVideo))
+      const exportData = exportSource.map(v => {
         const limited = v._isAnalyticsLimited
         return {
           'ID YouTube': v.youtube_id,
@@ -249,7 +282,7 @@ export default function VideoTable({ searchQuery }: Props) {
       ws['!cols'] = cols
       const date = new Date().toISOString().split('T')[0]
       XLSX.writeFile(wb, 'YoutubeManager-export-' + date + '.xlsx')
-      toast.success(filteredVideos.length + ' vidéos exportées !')
+      toast.success(exportSource.length + ' vidéos exportées !')
     } catch (e) {
       toast.error('Erreur export')
       console.error(e)
@@ -258,32 +291,29 @@ export default function VideoTable({ searchQuery }: Props) {
     }
   }
 
-  const videosWithColors = useMemo<VideoWithColor[]>(
-    () => videos.map(v => {
-      const color = applyColorRules(v, colorRules)
-      let colors: string[] = []
-      try { colors = applyAllColorRules(v, colorRules) } catch { colors = color ? [color] : [] }
-      if (!Array.isArray(colors)) colors = color ? [color] : []
-      const chMeta = channelsMap.get((v as any).channel_id)
-      const isLimited = chMeta ? !chMeta.analytics_available : false
-      return {
-        ...v,
-        _color: color,
-        _colors: colors,
-        _isAnalyticsLimited: isLimited,
-        _channelTitle: chMeta?.title || (v as any).channel_title || '',
-      } as VideoWithColor
-    }),
-    [videos, colorRules, channelsMap]
-  )
+  // Augmente une vidéo brute avec ses couleurs + infos de chaîne (réutilisé par l'affichage ET l'export)
+  const augmentVideo = useCallback((v: Video): VideoWithColor => {
+    const color = applyColorRules(v, colorRules)
+    let colors: string[] = []
+    try { colors = applyAllColorRules(v, colorRules) } catch { colors = color ? [color] : [] }
+    if (!Array.isArray(colors)) colors = color ? [color] : []
+    const chMeta = channelsMap.get((v as any).channel_id)
+    const isLimited = chMeta ? !chMeta.analytics_available : false
+    return {
+      ...v,
+      _color: color,
+      _colors: colors,
+      _isAnalyticsLimited: isLimited,
+      _channelTitle: chMeta?.title || (v as any).channel_title || '',
+    } as VideoWithColor
+  }, [colorRules, channelsMap])
 
-  // Apply color filter + advanced filters
-  const filteredVideos = useMemo(() => {
-    let result = videosWithColors
+  // Applique le filtre couleur + les filtres avancés (réutilisé par l'affichage ET l'export)
+  const applyClientFilters = useCallback((list: VideoWithColor[]): VideoWithColor[] => {
+    let result = list
     if (colorFilter) {
       result = result.filter(v => (v._colors || []).includes(colorFilter))
     }
-    // Apply advanced filters
     for (const filter of advancedFilters) {
       result = result.filter(v => {
         // Si la vidéo est en accès limité ET le filtre porte sur un champ analytics, on l'exclut
@@ -302,7 +332,18 @@ export default function VideoTable({ searchQuery }: Props) {
       })
     }
     return result
-  }, [videosWithColors, colorFilter, advancedFilters])
+  }, [colorFilter, advancedFilters])
+
+  const videosWithColors = useMemo<VideoWithColor[]>(
+    () => videos.map(augmentVideo),
+    [videos, augmentVideo]
+  )
+
+  // Filtres côté client appliqués à la page chargée
+  const filteredVideos = useMemo(
+    () => applyClientFilters(videosWithColors),
+    [videosWithColors, applyClientFilters]
+  )
 
   function handleSort(col: string) {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -310,6 +351,11 @@ export default function VideoTable({ searchQuery }: Props) {
   }
 
   const activeColumns = columns.filter(c => c.enabled)
+
+  // Pagination (calculs d'affichage)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const fromN = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const toN = Math.min(page * pageSize, total)
   const colorRuleFilters = colorRules.filter(r => r.enabled).slice(0, 4)
   const nonSortable = ['thumbnail_url', 'tags', 'playlists']
 
@@ -486,9 +532,9 @@ export default function VideoTable({ searchQuery }: Props) {
 
 
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={handleExport} disabled={exporting || filteredVideos.length === 0}
+          <button onClick={handleExport} disabled={exporting || total === 0}
             className="h-7 px-3 rounded-md text-xs font-medium border flex items-center gap-1.5 transition-all"
-            style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: exporting ? 'var(--text-muted)' : '#22c55e', opacity: filteredVideos.length === 0 ? 0.4 : 1 }}>
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: exporting ? 'var(--text-muted)' : '#22c55e', opacity: total === 0 ? 0.4 : 1 }}>
             <Download size={11} />
             {exporting ? 'Export...' : 'Exporter XLSX'}
           </button>
@@ -603,8 +649,40 @@ export default function VideoTable({ searchQuery }: Props) {
 
       {/* Status bar */}
       <div className="flex items-center px-5 py-1.5 border-t gap-4 shrink-0" style={{ borderColor: 'var(--bg-border)', background: 'var(--bg-secondary)' }}>
-        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{formatNumber(total)} vidéos au total</span>
-        {(colorFilter || advancedFilters.length > 0) && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{filteredVideos.length} filtrées</span>}
+        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+          {total === 0 ? '0 vidéo' : `${formatNumber(fromN)}–${formatNumber(toN)} sur ${formatNumber(total)}`}
+        </span>
+        {(colorFilter || advancedFilters.length > 0) && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{filteredVideos.length} filtrées sur cette page</span>}
+
+        <div className="flex items-center gap-2 ml-auto">
+          <label className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Par page</label>
+          <select
+            value={pageSize}
+            onChange={e => setPageSize(Number(e.target.value))}
+            className="text-[11px] rounded px-1.5 py-0.5 outline-none"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--bg-border)', color: 'var(--text-secondary)' }}
+          >
+            <option value={500}>500</option>
+            <option value={1000}>1000</option>
+            <option value={2000}>2000</option>
+          </select>
+
+          <button
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={page <= 1 || loading}
+            className="text-[11px] px-2 py-0.5 rounded border transition-all"
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)', opacity: (page <= 1 || loading) ? 0.4 : 1, cursor: (page <= 1 || loading) ? 'default' : 'pointer' }}
+          >‹ Précédent</button>
+
+          <span className="text-[11px] tabular-nums" style={{ color: 'var(--text-secondary)' }}>Page {page} / {totalPages}</span>
+
+          <button
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages || loading}
+            className="text-[11px] px-2 py-0.5 rounded border transition-all"
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)', opacity: (page >= totalPages || loading) ? 0.4 : 1, cursor: (page >= totalPages || loading) ? 'default' : 'pointer' }}
+          >Suivant ›</button>
+        </div>
       </div>
 
       {showColumnManager && (

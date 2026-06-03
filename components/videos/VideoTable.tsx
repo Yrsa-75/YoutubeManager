@@ -327,10 +327,29 @@ export default function VideoTable({ searchQuery }: Props) {
     )
   }
 
+  // Analytics pas encore récupérées par le cron (analytics_synced_at vide) → "loading…"
+  function loadingAnalyticsCell() {
+    return (
+      <span
+        className="font-mono text-xs italic"
+        style={{ color: 'var(--text-muted)' }}
+        title="Analytics en cours de récupération — actualisez dans quelques minutes."
+      >
+        loading…
+      </span>
+    )
+  }
+
   function renderCell(video: VideoWithColor, colKey: string) {
     // Court-circuit : si la vidéo est en accès limité ET la colonne est analytics, afficher tiret avec tooltip
     if (video._isAnalyticsLimited && ANALYTICS_FIELDS.has(colKey)) {
       return limitedAnalyticsCell()
+    }
+
+    // Pas encore synchronisé par le cron → "loading…" pour les colonnes watchtime/engagement.
+    // (On EXCLUT les revenus : ils ont une autre source et peuvent déjà être renseignés.)
+    if (!video.analytics_synced_at && ANALYTICS_FIELDS.has(colKey) && colKey !== 'estimated_revenue') {
+      return loadingAnalyticsCell()
     }
 
     switch (colKey) {

@@ -31,12 +31,12 @@ export default function VideoAnalytics({ video }: Props) {
   const pctColor = avgPct >= 50 ? '#22c55e' : avgPct >= 30 ? '#f97316' : '#ef4444'
 
   const cards = [
-    { label: 'Duree moy. visionnage', value: formatViewDuration(avgViewSec), sub: totalDurationSec > 0 ? `sur ${formatViewDuration(totalDurationSec)}` : undefined },
-    { label: '% regarde', value: formatPercentage(avgPct), color: pctColor },
-    { label: 'Temps total regarde', value: formatMinutes(video.estimated_minutes_watched) },
+    { label: 'Durée moy. de visionnage', value: formatViewDuration(avgViewSec), sub: totalDurationSec > 0 ? `sur ${formatViewDuration(totalDurationSec)}` : undefined },
+    { label: 'Pourcentage moyen visionné', value: formatPercentage(avgPct), color: pctColor },
+    { label: 'Durée de visionnage totale', value: formatMinutes(video.estimated_minutes_watched) },
     { label: 'Partages', value: video.shares != null ? formatNumber(video.shares) : '—' },
-    { label: 'Abonnes gagnes', value: video.subscribers_gained != null ? '+' + formatNumber(video.subscribers_gained) : '—', color: '#22c55e' },
-    { label: 'Abonnes perdus', value: video.subscribers_lost != null ? '-' + formatNumber(video.subscribers_lost) : '—', color: '#ef4444' },
+    { label: 'Abonnés gagnés', value: video.subscribers_gained != null ? '+' + formatNumber(video.subscribers_gained) : '—', color: '#22c55e' },
+    { label: 'Abonnés perdus', value: video.subscribers_lost != null ? '-' + formatNumber(video.subscribers_lost) : '—', color: '#ef4444' },
   ]
 
   const gaugeRadius = 45
@@ -60,7 +60,7 @@ export default function VideoAnalytics({ video }: Props) {
       </div>
       {totalDurationSec > 0 && avgViewSec > 0 && (
         <div className="px-4">
-          <div className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Visionnage vs Duree</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Visionnage vs Durée</div>
           <div className="rounded-lg border p-3" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)' }}>
             <div className="flex justify-between text-[10px] mb-1.5">
               <span style={{ color: 'var(--text-muted)' }}>0:00</span>

@@ -14,6 +14,7 @@ export default function Dashboard() {
   const { data: session, status } = useSession()
   const [activeTab, setActiveTab] = useState<TabType>('uploaded')
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchField, setSearchField] = useState('all')
 
   if (status === 'loading') {
     return (
@@ -54,9 +55,11 @@ export default function Dashboard() {
           activeTab={activeTab}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
+          searchField={searchField}
+          setSearchField={setSearchField}
         />
         <main className="flex-1 overflow-hidden">
-          {activeTab === 'uploaded' && <VideoTable searchQuery={searchQuery} />}
+          {activeTab === 'uploaded' && <VideoTable searchQuery={searchQuery} searchField={searchField} />}
           {activeTab === 'pending' && <PendingTable searchQuery={searchQuery} />}
           {activeTab === 'rules' && <ColorRulesEditor />}
         </main>

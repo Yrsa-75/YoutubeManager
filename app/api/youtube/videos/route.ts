@@ -18,6 +18,10 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url)
     const search = searchParams.get('search') || ''
+    // Champ de recherche : all (defaut) | title | description | tags
+    const searchField = searchParams.get('searchField') || 'all'
+    // Format : '' (tous) | video | short
+    const format = searchParams.get('format') || ''
     const status = searchParams.get('status') || ''
     const channelIds = searchParams.get('channelIds') || ''
     const sortBy = searchParams.get('sortBy') || 'published_at'
@@ -70,14 +74,33 @@ export async function GET(req: NextRequest) {
     }
 
     if (search) {
-      query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%,tags.cs.{${search}}`)
+      // Echappement des caracteres reserves de la syntaxe PostgREST dans .or()
+      const safe = search.replace(/[,()]/g, ' ').trim()
+      // tags_text = colonne generee (tags -> texte) : permet la recherche PARTIELLE
+      // dans les tags, la ou tags.cs.{} exigeait une correspondance exacte.
+      if (searchField === 'title') {
+        query = query.ilike('title', `%${safe}%`)
+      } else if (searchField === 'description') {
+        query = query.ilike('description', `%${safe}%`)
+      } else if (searchField === 'tags') {
+        query = query.ilike('tags_text', `%${safe}%`)
+      } else {
+        query = query.or(`title.ilike.%${safe}%,description.ilike.%${safe}%,tags_text.ilike.%${safe}%,youtube_id.ilike.%${safe}%`)
+      }
     }
     if (status) query = query.eq('status', status)
+    if (format === 'short') {
+      query = query.eq('is_short', true)
+    } else if (format === 'video') {
+      // is_short FALSE ou pas encore classifie (NULL) => traite comme video classique
+      query = query.or('is_short.is.null,is_short.eq.false')
+    }
 
     // La colonne "Date de publication" (clé 'publication') est calculee :
     // date programmee si presente, sinon date reelle. On trie sur la colonne
     // generee publication_date = COALESCE(scheduled_publish_at, published_at).
-    const sortColumn = sortBy === 'publication' ? 'publication_date' : sortBy
+    const SORT_MAP: Record<string, string> = { publication: 'publication_date', format: 'is_short' }
+    const sortColumn = SORT_MAP[sortBy] || sortBy
     query = query.order(sortColumn, { ascending: sortDir === 'asc' })
     query = query.range(offset, offset + limit - 1)
 

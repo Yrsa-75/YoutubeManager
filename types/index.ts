@@ -5,6 +5,11 @@ export interface Video {
   description: string
   thumbnail_url: string
   published_at: string
+  // Vraie date d'upload (ajout à la playlist d'uploads YouTube).
+  // Peut différer de published_at quand la publication a été programmée plus tard.
+  uploaded_at?: string | null
+  // Short YouTube ? TRUE = Short, FALSE = vidéo classique, NULL = pas encore classifié
+  is_short?: boolean | null
   // Date de mise en ligne programmée (YouTube status.publishAt).
   // Renseignée uniquement pour les vidéos programmées (privées avec date de sortie). NULL sinon.
   scheduled_publish_at?: string | null

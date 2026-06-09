@@ -4,6 +4,10 @@
     {
       "path": "/api/youtube/analytics-batch",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/youtube/classify-shorts",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

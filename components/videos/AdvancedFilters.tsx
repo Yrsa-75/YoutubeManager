@@ -11,14 +11,14 @@ export interface AdvancedFilter {
 
 const FILTER_FIELDS = [
   { key: 'view_count', label: 'Vues', type: 'number' },
-  { key: 'like_count', label: 'Likes', type: 'number' },
+  { key: 'like_count', label: "J'aime", type: 'number' },
   { key: 'comment_count', label: 'Commentaires', type: 'number' },
-  { key: 'average_view_duration', label: 'Duree moy. (sec)', type: 'number' },
-  { key: 'average_view_percentage', label: '% regarde', type: 'number' },
-  { key: 'estimated_minutes_watched', label: 'Temps regarde (min)', type: 'number' },
+  { key: 'average_view_duration', label: 'Durée moy. de visionnage (sec)', type: 'number' },
+  { key: 'average_view_percentage', label: 'Pourcentage moyen visionné', type: 'number' },
+  { key: 'estimated_minutes_watched', label: 'Durée de visionnage (min)', type: 'number' },
   { key: 'shares', label: 'Partages', type: 'number' },
-  { key: 'subscribers_gained', label: 'Abonnes gagnes', type: 'number' },
-  { key: 'subscribers_lost', label: 'Abonnes perdus', type: 'number' },
+  { key: 'subscribers_gained', label: 'Abonnés gagnés', type: 'number' },
+  { key: 'subscribers_lost', label: 'Abonnés perdus', type: 'number' },
 ]
 
 const OPERATORS = [

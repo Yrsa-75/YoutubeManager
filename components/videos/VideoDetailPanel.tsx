@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { X, Sparkles, Copy, RotateCcw, Lock } from 'lucide-react'
 import type { Video } from '@/types'
 import { formatNumber, formatDate, formatDuration, formatViewDuration, formatPercentage, formatMinutes } from '@/lib/utils/format'
@@ -16,6 +16,41 @@ const LANGUAGES = [
 ]
 
 const LIMITED_TOOLTIP = "Données indisponibles — chaîne en accès limité (Manager YouTube)"
+
+const VISIBILITY_FR: Record<string, string> = {
+  public: 'Publique',
+  private: 'Privée',
+  unlisted: 'Non répertoriée',
+}
+
+// Miniature du panneau avec chaîne de secours (vidéos privées : YouTube ne sert
+// pas toujours l'URL stockée). Essais : URL stockée -> hq -> mq -> default -> rien.
+function PanelThumb({ video }: { video: Video }) {
+  const candidates = useMemo(() => {
+    const id = video.youtube_id
+    return Array.from(new Set([
+      video.thumbnail_url,
+      `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+      `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
+      `https://i.ytimg.com/vi/${id}/default.jpg`,
+    ].filter(Boolean) as string[]))
+  }, [video.youtube_id, video.thumbnail_url])
+  const [idx, setIdx] = useState(0)
+  useEffect(() => { setIdx(0) }, [video.youtube_id])
+  if (idx >= candidates.length) {
+    return (
+      <div className="w-full rounded-lg mb-3 flex items-center justify-center text-[11px]"
+        style={{ aspectRatio: '16/9', background: 'var(--bg-hover)', color: 'var(--text-muted)' }}>
+        {video.status === 'private' ? 'Vidéo privée — miniature non fournie par YouTube' : 'Miniature indisponible'}
+      </div>
+    )
+  }
+  return (
+    <img src={candidates[idx]} alt="" className="w-full rounded-lg mb-3" referrerPolicy="no-referrer"
+      onError={() => setIdx(i => i + 1)}
+      style={{ aspectRatio: '16/9', objectFit: 'cover' }} />
+  )
+}
 
 export default function VideoDetailPanel({ video, onClose }: Props) {
   const [loading, setLoading] = useState<string | null>(null)
@@ -75,25 +110,25 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
   // Cards : on garde les 4 publiques toujours, et on adapte les analytics selon le mode
   const publicCards = [
     { label: 'Vues', value: formatNumber(video.view_count), color: 'var(--text-primary)' },
-    { label: 'Likes', value: formatNumber(video.like_count) },
+    { label: "J'aime", value: formatNumber(video.like_count) },
     { label: 'Commentaires', value: formatNumber(video.comment_count) },
     { label: 'Durée', value: formatDuration(video.duration) },
   ]
 
   const analyticsCardsAvailable = [
-    { label: 'Visionnage moy.', value: formatViewDuration(avgViewSec), sub: totalDurationSec > 0 ? `sur ${formatDuration(video.duration)}` : undefined },
-    { label: 'Temps regardé', value: formatMinutes(video.estimated_minutes_watched) },
+    { label: 'Durée moy. de visionnage', value: formatViewDuration(avgViewSec), sub: totalDurationSec > 0 ? `sur ${formatDuration(video.duration)}` : undefined },
+    { label: 'Durée de visionnage', value: formatMinutes(video.estimated_minutes_watched) },
     { label: 'Partages', value: formatNumber(video.shares || 0) },
-    { label: 'Abonnés +', value: '+' + formatNumber(video.subscribers_gained || 0), color: '#22c55e' },
-    { label: 'Abonnés -', value: '-' + formatNumber(video.subscribers_lost || 0), color: '#ef4444' },
+    { label: 'Abonnés gagnés', value: '+' + formatNumber(video.subscribers_gained || 0), color: '#22c55e' },
+    { label: 'Abonnés perdus', value: '-' + formatNumber(video.subscribers_lost || 0), color: '#ef4444' },
   ]
 
   const analyticsCardsLimited = [
-    { label: 'Visionnage moy.', value: '—', sub: 'Indisponible', limited: true },
-    { label: 'Temps regardé', value: '—', sub: 'Indisponible', limited: true },
+    { label: 'Durée moy. de visionnage', value: '—', sub: 'Indisponible', limited: true },
+    { label: 'Durée de visionnage', value: '—', sub: 'Indisponible', limited: true },
     { label: 'Partages', value: '—', sub: 'Indisponible', limited: true },
-    { label: 'Abonnés +', value: '—', sub: 'Indisponible', limited: true },
-    { label: 'Abonnés -', value: '—', sub: 'Indisponible', limited: true },
+    { label: 'Abonnés gagnés', value: '—', sub: 'Indisponible', limited: true },
+    { label: 'Abonnés perdus', value: '—', sub: 'Indisponible', limited: true },
   ]
 
   const metricCards = [
@@ -116,15 +151,13 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
       <div className="flex-1 overflow-y-auto">
         {/* Thumbnail + Title */}
         <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--bg-border)' }}>
-          {video.thumbnail_url && (
-            <img src={video.thumbnail_url} alt="" className="w-full rounded-lg mb-3" referrerPolicy="no-referrer"
-              style={{ aspectRatio: '16/9', objectFit: 'cover' }} />
-          )}
+          <PanelThumb video={video} />
           <h3 className="text-sm font-semibold leading-snug mb-1" style={{ color: 'var(--text-primary)' }}>{video.title}</h3>
           <div className="flex items-center gap-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-            <span>{formatDate(video.published_at)}</span>
+            <span>{formatDate(video.uploaded_at || video.published_at)}</span>
             <span>·</span>
-            <span>{video.status}</span>
+            <span>{VISIBILITY_FR[video.status] || video.status}</span>
+            {video.is_short === true && (<><span>·</span><span style={{ color: 'var(--accent-red)', fontWeight: 600 }}>Short</span></>)}
             <span>·</span>
             <a href={`https://youtube.com/watch?v=${video.youtube_id}`} target="_blank" rel="noreferrer"
               className="underline" style={{ color: 'var(--accent-red)' }}>YouTube</a>

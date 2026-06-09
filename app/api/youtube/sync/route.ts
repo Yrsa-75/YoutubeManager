@@ -25,6 +25,7 @@ export async function POST() {
 
     // Step 2: Paginate playlistItems.list to get all video IDs (1 unit/page instead of 100)
     let allVideoIds: string[] = []
+    const uploadedAtMap = new Map<string, string>()
     let pageToken: string | undefined
 
     do {
@@ -40,10 +41,15 @@ export async function POST() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error?.message || 'YouTube API error')
 
-      const ids = data.items?.map(
-        (item: any) => item.snippet?.resourceId?.videoId
-      ).filter(Boolean) || []
-      allVideoIds.push(...ids)
+      for (const item of (data.items || [])) {
+        const vid = item.snippet?.resourceId?.videoId
+        if (!vid) continue
+        allVideoIds.push(vid)
+        // snippet.publishedAt d'un playlistItem de la playlist d'uploads = vraie date d'upload
+        if (item.snippet?.publishedAt && !uploadedAtMap.has(vid)) {
+          uploadedAtMap.set(vid, item.snippet.publishedAt)
+        }
+      }
 
       pageToken = data.nextPageToken
     } while (pageToken && allVideoIds.length < 10000)
@@ -82,6 +88,7 @@ export async function POST() {
       description: video.snippet?.description,
       thumbnail_url: video.snippet?.thumbnails?.medium?.url,
       published_at: video.snippet?.publishedAt,
+      uploaded_at: uploadedAtMap.get(video.id) || null,
       status: video.status?.privacyStatus,
       duration: video.contentDetails?.duration,
       tags: video.snippet?.tags || [],

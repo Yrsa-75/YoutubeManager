@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
-import { ChevronUp, ChevronDown, Sparkles, ExternalLink, Settings2, Download, Filter } from 'lucide-react'
+import { ChevronUp, ChevronDown, Sparkles, ExternalLink, Settings2, Download, Filter, Lock, Film } from 'lucide-react'
 import type { Video, ColorRule } from '@/types'
 import { formatNumber, formatDate, formatDuration, formatViewDuration, formatPercentage, formatMinutes } from '@/lib/utils/format'
 import { capShortsMetrics } from '@/lib/utils/shortsLoopCap'
@@ -12,12 +12,13 @@ import toast from 'react-hot-toast'
 
 interface Props {
   searchQuery: string
+  searchField: string
 }
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  public: { label: 'Public', color: '#22c55e' },
-  private: { label: 'Privé', color: '#6b7280' },
-  unlisted: { label: 'Non répertorié', color: '#f97316' },
+  public: { label: 'Publique', color: '#22c55e' },
+  private: { label: 'Privée', color: '#6b7280' },
+  unlisted: { label: 'Non répertoriée', color: '#f97316' },
 }
 
 const COLOR_BG: Record<string, string> = {
@@ -28,27 +29,62 @@ const COLOR_BG: Record<string, string> = {
   '#a855f7': 'rgba(168,85,247,0.05)',
 }
 
+// Libellés alignés sur le vocabulaire YouTube Studio (FR)
 const DEFAULT_COLUMNS = [
   { key: 'thumbnail_url', label: 'Miniature', enabled: true, width: 60 },
   { key: 'youtube_id', label: 'ID', enabled: true },
   { key: 'title', label: 'Titre', enabled: true },
-  { key: 'status', label: 'Statut', enabled: true },
-  { key: 'published_at', label: 'Upload', enabled: true },
+  { key: 'format', label: 'Format', enabled: true },
+  { key: 'status', label: 'Visibilité', enabled: true },
+  { key: 'uploaded_at', label: 'Mise en ligne', enabled: true },
   { key: 'publication', label: 'Date de publication', enabled: true },
   { key: 'view_count', label: 'Vues', enabled: true },
-  { key: 'like_count', label: 'Likes', enabled: true },
+  { key: 'like_count', label: "J'aime", enabled: true },
   { key: 'comment_count', label: 'Commentaires', enabled: true },
   { key: 'duration', label: 'Durée', enabled: true },
-  { key: 'average_view_duration', label: 'Visionnage moy.', enabled: false },
-  { key: 'average_view_percentage', label: '% regardé', enabled: false },
-  { key: 'estimated_minutes_watched', label: 'Temps regardé', enabled: false },
+  { key: 'average_view_duration', label: 'Durée moy. de visionnage', enabled: false },
+  { key: 'average_view_percentage', label: 'Pourcentage moyen visionné', enabled: false },
+  { key: 'estimated_minutes_watched', label: 'Durée de visionnage (min)', enabled: false },
   { key: 'shares', label: 'Partages', enabled: false },
-  { key: 'subscribers_gained', label: 'Abonnés +', enabled: false },
-  { key: 'subscribers_lost', label: 'Abonnés -', enabled: false },
-  { key: 'estimated_revenue', label: 'Revenus', enabled: false },
+  { key: 'subscribers_gained', label: 'Abonnés gagnés', enabled: false },
+  { key: 'subscribers_lost', label: 'Abonnés perdus', enabled: false },
+  { key: 'estimated_revenue', label: 'Revenus estimés', enabled: false },
   { key: 'playlists', label: 'Playlists', enabled: false },
   { key: 'tags', label: 'Tags', enabled: false },
 ]
+
+// --- Miniature avec chaîne de secours -------------------------------------
+// YouTube ne sert pas toujours la miniature stockée (vidéos privées notamment).
+// On essaie : URL stockée -> hqdefault -> mqdefault -> default -> placeholder.
+function VideoThumb({ video }: { video: Video }) {
+  const candidates = useMemo(() => {
+    const id = video.youtube_id
+    const list = [
+      video.thumbnail_url,
+      `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+      `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
+      `https://i.ytimg.com/vi/${id}/default.jpg`,
+    ].filter(Boolean) as string[]
+    return Array.from(new Set(list))
+  }, [video.youtube_id, video.thumbnail_url])
+  const [idx, setIdx] = useState(0)
+  useEffect(() => { setIdx(0) }, [video.youtube_id])
+
+  if (idx >= candidates.length) {
+    // Placeholder final : cadenas pour les vidéos privées, pellicule sinon
+    return (
+      <div className="rounded flex items-center justify-center" title={video.status === 'private' ? 'Vidéo privée — miniature non fournie par YouTube' : 'Miniature indisponible'}
+        style={{ width: 48, height: 28, background: 'var(--bg-hover)', color: 'var(--text-muted)' }}>
+        {video.status === 'private' ? <Lock size={11} /> : <Film size={11} />}
+      </div>
+    )
+  }
+  return (
+    <img src={candidates[idx]} alt="" className="rounded" referrerPolicy="no-referrer" loading="lazy"
+      onError={() => setIdx(i => i + 1)}
+      style={{ width: 48, height: 28, objectFit: 'cover' }} />
+  )
+}
 
 // Champs qui dépendent de l'API YouTube Analytics (pas accessibles en mode Manager limité)
 const ANALYTICS_FIELDS = new Set([
@@ -69,13 +105,14 @@ type VideoWithColor = Video & {
   _channelTitle?: string
 }
 
-export default function VideoTable({ searchQuery }: Props) {
+export default function VideoTable({ searchQuery, searchField }: Props) {
   const [videos, setVideos] = useState<Video[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [sortBy, setSortBy] = useState('published_at')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [statusFilter, setStatusFilter] = useState('')
+  const [formatFilter, setFormatFilter] = useState('') // '' | 'video' | 'short'
   const [colorFilter, setColorFilter] = useState('')
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
   const [colorRules, setColorRules] = useState<ColorRule[]>([])
@@ -116,7 +153,7 @@ export default function VideoTable({ searchQuery }: Props) {
     if (!didMountRef.current) { didMountRef.current = true; return }
     if (page !== 1) setPage(1)
     else fetchVideos()
-  }, [searchQuery, sortBy, sortDir, statusFilter, pageSize])
+  }, [searchQuery, searchField, sortBy, sortDir, statusFilter, formatFilter, pageSize])
 
   useEffect(() => {
     const handler = () => {
@@ -140,15 +177,18 @@ export default function VideoTable({ searchQuery }: Props) {
       const data = await res.json()
       if (data.columns && data.columns.length > 0) {
         // Merge persisted config with defaults (in case new columns were added)
-        const persistedMap = new Map(data.columns.map((c: any) => [c.key, c]))
-        const merged = [...data.columns.map((c: any) => {
+        // Migration : l'ancienne colonne 'published_at' (libellée "Upload") devient
+        // 'uploaded_at' (vraie date de mise en ligne), en conservant sa position.
+        const normalized = data.columns.map((c: any) => c.key === 'published_at' ? { ...c, key: 'uploaded_at' } : c)
+        const persistedMap = new Map(normalized.map((c: any) => [c.key, c]))
+        const merged = [...normalized.map((c: any) => {
           const def = DEFAULT_COLUMNS.find(d => d.key === c.key)
           return { key: c.key, label: def?.label || c.label || c.key, enabled: c.enabled, width: c.width || def?.width }
         })]
-        // Add any new columns not in persisted config
-        DEFAULT_COLUMNS.forEach(def => {
+        // Add any new columns not in persisted config (à leur position par défaut)
+        DEFAULT_COLUMNS.forEach((def, defIdx) => {
           if (!persistedMap.has(def.key)) {
-            merged.push(def)
+            merged.splice(Math.min(defIdx, merged.length), 0, def)
           }
         })
         setColumns(merged)
@@ -198,7 +238,7 @@ export default function VideoTable({ searchQuery }: Props) {
   async function fetchVideos() {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ search: searchQuery, sortBy, sortDir, status: statusFilter, page: String(page), limit: String(pageSize) })
+      const params = new URLSearchParams({ search: searchQuery, searchField, sortBy, sortDir, status: statusFilter, format: formatFilter, page: String(page), limit: String(pageSize) })
       const res = await fetch('/api/youtube/videos?' + params)
       const data = await res.json()
       setVideos(data.videos || [])
@@ -226,7 +266,7 @@ export default function VideoTable({ searchQuery }: Props) {
     const EXPORT_LIMIT = 2000
     let p = 1
     while (p <= 100) {
-      const params = new URLSearchParams({ search: searchQuery, sortBy, sortDir, status: statusFilter, page: String(p), limit: String(EXPORT_LIMIT) })
+      const params = new URLSearchParams({ search: searchQuery, searchField, sortBy, sortDir, status: statusFilter, format: formatFilter, page: String(p), limit: String(EXPORT_LIMIT) })
       const res = await fetch('/api/youtube/videos?' + params)
       const data = await res.json()
       const batch: Video[] = data.videos || []
@@ -250,22 +290,23 @@ export default function VideoTable({ searchQuery }: Props) {
           'ID YouTube': v.youtube_id,
           'Chaîne': v._channelTitle || '',
           'Titre': v.title,
-          'Statut': v.status,
-          'Date upload': v.published_at ? new Date(v.published_at).toLocaleDateString('fr-FR') : '',
-          'Publication': v.scheduled_publish_at
+          'Format': v.is_short === true ? 'Short' : v.is_short === false ? 'Vidéo' : 'À classifier',
+          'Visibilité': STATUS_LABELS[v.status]?.label || v.status,
+          'Mise en ligne': (v.uploaded_at || v.published_at) ? new Date(v.uploaded_at || v.published_at).toLocaleDateString('fr-FR') : '',
+          'Date de publication': v.scheduled_publish_at
             ? 'Programmée : ' + new Date(v.scheduled_publish_at).toLocaleString('fr-FR')
             : (v.published_at ? new Date(v.published_at).toLocaleDateString('fr-FR') : ''),
           'Vues': v.view_count,
-          'Likes': v.like_count,
+          "J'aime": v.like_count,
           'Commentaires': v.comment_count,
           'Durée': formatDuration(v.duration),
-          'Durée moy. visionnage': limited ? 'N/A (accès limité)' : (v.average_view_duration ? formatViewDuration(v.average_view_duration) : ''),
-          '% regardé': limited ? 'N/A (accès limité)' : (v.average_view_percentage ? v.average_view_percentage.toFixed(1) + '%' : ''),
-          'Temps regardé (min)': limited ? 'N/A' : (v.estimated_minutes_watched || 0),
+          'Durée moy. de visionnage': limited ? 'N/A (accès limité)' : (v.average_view_duration ? formatViewDuration(v.average_view_duration) : ''),
+          'Pourcentage moyen visionné': limited ? 'N/A (accès limité)' : (v.average_view_percentage ? v.average_view_percentage.toFixed(1) + '%' : ''),
+          'Durée de visionnage (min)': limited ? 'N/A' : (v.estimated_minutes_watched || 0),
           'Partages': limited ? 'N/A' : (v.shares || 0),
           'Abonnés gagnés': limited ? 'N/A' : (v.subscribers_gained || 0),
           'Abonnés perdus': limited ? 'N/A' : (v.subscribers_lost || 0),
-          'Revenus (€)': limited ? 'N/A' : (v.estimated_revenue || 0),
+          'Revenus estimés (€)': limited ? 'N/A' : (v.estimated_revenue || 0),
           'Playlists': (v.playlists || []).map(p => p.title).join(', '),
           'Tags': (v.tags || []).join(', '),
           'Description': v.description || '',
@@ -400,9 +441,7 @@ export default function VideoTable({ searchQuery }: Props) {
 
     switch (colKey) {
       case 'thumbnail_url':
-        return video.thumbnail_url
-          ? <img src={video.thumbnail_url} alt="" className="rounded" referrerPolicy="no-referrer" style={{ width: 48, height: 28, objectFit: 'cover' }} />
-          : <div className="rounded flex items-center justify-center text-xs" style={{ width: 48, height: 28, background: 'var(--bg-hover)', color: 'var(--text-muted)' }}>YT</div>
+        return <VideoThumb video={video} />
       case 'youtube_id':
         return <span className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>{video.youtube_id}</span>
       case 'title':
@@ -411,8 +450,19 @@ export default function VideoTable({ searchQuery }: Props) {
         const s = STATUS_LABELS[video.status] || { label: video.status, color: '#6b7280' }
         return <span className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ background: s.color + '20', color: s.color }}>{s.label}</span>
       }
-      case 'published_at':
-        return <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{formatDate(video.published_at)}</span>
+      case 'uploaded_at':
+        // Vraie date de mise en ligne. Fallback sur published_at tant que la
+        // resynchronisation n'a pas rempli uploaded_at pour les anciennes lignes.
+        return <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{formatDate(video.uploaded_at || video.published_at)}</span>
+      case 'format': {
+        if (video.is_short === true) {
+          return <span className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ background: 'rgba(230,57,70,0.15)', color: 'var(--accent-red)' }}>Short</span>
+        }
+        if (video.is_short === false) {
+          return <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}>Vidéo</span>
+        }
+        return <span className="text-[11px] cursor-help" style={{ color: 'var(--text-muted)' }} title="Classification en cours — vérifiée automatiquement (vidéos privées : à leur publication)">…</span>
+      }
       case 'publication': {
         // Colonne intelligente :
         //  - vidéo programmée (scheduled_publish_at présent) → date de sortie prévue + badge ⏱
@@ -510,7 +560,21 @@ export default function VideoTable({ searchQuery }: Props) {
               borderColor: statusFilter === s ? 'rgba(230,57,70,0.3)' : 'var(--bg-border)',
               color: statusFilter === s ? 'var(--accent-red)' : 'var(--text-secondary)'
             }}>
-            {s === '' ? 'Tous' : s === 'public' ? 'Public' : s === 'private' ? 'Privé' : 'Non répertorié'}
+            {s === '' ? 'Toutes' : s === 'public' ? 'Publiques' : s === 'private' ? 'Privées' : 'Non répertoriées'}
+          </button>
+        ))}
+
+        <div className="w-px h-4 mx-1" style={{ background: 'var(--bg-border)' }} />
+
+        {([['', 'Tous formats'], ['video', 'Vidéos'], ['short', 'Shorts']] as const).map(([val, lbl]) => (
+          <button key={val || 'allf'} onClick={() => setFormatFilter(val)}
+            className="h-7 px-3 rounded-md text-xs font-medium border transition-all"
+            style={{
+              background: formatFilter === val ? 'rgba(230,57,70,0.12)' : 'var(--bg-card)',
+              borderColor: formatFilter === val ? 'rgba(230,57,70,0.3)' : 'var(--bg-border)',
+              color: formatFilter === val ? 'var(--accent-red)' : 'var(--text-secondary)'
+            }}>
+            {lbl}
           </button>
         ))}
 

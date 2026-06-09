@@ -6,15 +6,15 @@ import toast from 'react-hot-toast'
 
 const FIELD_OPTIONS = [
   { value: 'view_count', label: 'Vues totales' },
-  { value: 'like_count', label: 'Likes' },
+  { value: 'like_count', label: "J'aime" },
   { value: 'comment_count', label: 'Commentaires' },
-  { value: 'days_since_upload', label: 'Jours depuis upload' },
-  { value: 'average_view_duration', label: 'Visionnage moy. (sec)' },
-  { value: 'average_view_percentage', label: '% regarde' },
-  { value: 'estimated_minutes_watched', label: 'Temps regarde (min)' },
+  { value: 'days_since_upload', label: 'Jours depuis la mise en ligne' },
+  { value: 'average_view_duration', label: 'Durée moy. de visionnage (sec)' },
+  { value: 'average_view_percentage', label: 'Pourcentage moyen visionné' },
+  { value: 'estimated_minutes_watched', label: 'Durée de visionnage (min)' },
   { value: 'shares', label: 'Partages' },
-  { value: 'subscribers_gained', label: 'Abonnes gagnes' },
-  { value: 'subscribers_lost', label: 'Abonnes perdus' },
+  { value: 'subscribers_gained', label: 'Abonnés gagnés' },
+  { value: 'subscribers_lost', label: 'Abonnés perdus' },
 ]
 
 const OPERATOR_OPTIONS = [

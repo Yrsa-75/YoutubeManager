@@ -497,17 +497,31 @@ export async function POST() {
         const uplId = cd.items?.[0]?.contentDetails?.relatedPlaylists?.uploads
         if (!uplId) throw new Error('No uploads playlist for ' + chName)
 
+        // Map videoId -> date d'AJOUT a la playlist d'uploads = vraie date d'upload.
+        // (videos.snippet.publishedAt = date de PUBLICATION publique, qui peut etre
+        // bien plus tardive quand le client programme la sortie. Les deux infos
+        // sont distinctes et on stocke les deux : uploaded_at / published_at.)
+        const uploadedAtMap = new Map<string, string>()
         let npt: string | undefined
         do {
           const u = new URL('https://www.googleapis.com/youtube/v3/playlistItems')
-          u.searchParams.set('part', 'contentDetails')
+          u.searchParams.set('part', 'contentDetails,snippet')
           u.searchParams.set('playlistId', uplId)
           u.searchParams.set('maxResults', '50')
           if (npt) u.searchParams.set('pageToken', npt)
           const r = await fetch(u.toString(), { headers: { Authorization: `Bearer ${token}` } })
           const d = await r.json()
           if (!r.ok) throw new Error(d.error?.message || 'Failed to list items')
-          videoIds = videoIds.concat((d.items || []).map((i: any) => i.contentDetails?.videoId).filter(Boolean))
+          for (const it of (d.items || [])) {
+            const vid = it.contentDetails?.videoId
+            if (!vid) continue
+            videoIds.push(vid)
+            // snippet.publishedAt d'un playlistItem = date d'ajout a la playlist.
+            // Pour la playlist d'uploads, c'est la date de mise en ligne du fichier.
+            if (it.snippet?.publishedAt && !uploadedAtMap.has(vid)) {
+              uploadedAtMap.set(vid, it.snippet.publishedAt)
+            }
+          }
           npt = d.nextPageToken
         } while (npt)
 
@@ -535,6 +549,9 @@ export async function POST() {
             title: v.snippet?.title, description: v.snippet?.description,
             thumbnail_url: v.snippet?.thumbnails?.medium?.url,
             published_at: v.snippet?.publishedAt,
+            // Vraie date d'upload (ajout a la playlist d'uploads). Peut differer de
+            // published_at quand la publication a ete programmee plus tard.
+            uploaded_at: uploadedAtMap.get(v.id) || null,
             // Date de mise en ligne programmée (uniquement pour les vidéos privées programmées).
             // status.publishAt est déjà inclus car on demande part=...,status sur videos.list
             scheduled_publish_at: v.status?.publishAt || null,

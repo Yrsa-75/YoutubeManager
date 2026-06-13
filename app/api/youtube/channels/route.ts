@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/options'
+import { getWorkspaceUserId } from '@/lib/gate/session'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -10,10 +11,8 @@ const supabase = createClient(
 
 // GET: list all channels the current user has access to (owner, operator, viewer, viewer_limited)
 export async function GET() {
-  const session = await getServerSession(authOptions)
-  if (!session?.userId) return NextResponse.json({ channels: [] })
-
-  const userId = session.userId
+  const userId = await getWorkspaceUserId()
+  if (!userId) return NextResponse.json({ channels: [] })
 
   const { data: accesses } = await supabase
     .from('channel_access')

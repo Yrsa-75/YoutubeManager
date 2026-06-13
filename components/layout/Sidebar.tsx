@@ -1,6 +1,4 @@
 'use client'
-import { useRouter } from 'next/navigation'
-import { signOut, useSession } from 'next-auth/react'
 import { Play, Clock, Palette, RefreshCw, LogOut, BarChart2, Sun, Moon, Settings } from 'lucide-react'
 import type { TabType } from '@/types'
 import { useState } from 'react'
@@ -11,13 +9,21 @@ import ChannelSelector from '@/components/channels/ChannelSelector'
 interface Props {
   activeTab: TabType
   setActiveTab: (t: TabType) => void
+  isAdmin?: boolean
+  email?: string
 }
 
-export default function Sidebar({ activeTab, setActiveTab }: Props) {
-  const { data: session } = useSession()
+export default function Sidebar({ activeTab, setActiveTab, isAdmin = false, email = '' }: Props) {
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState<string | null>(null)
   const { theme, toggleTheme } = useTheme()
+
+  async function handleLogout() {
+    try {
+      await fetch('/api/gate/logout', { method: 'POST' })
+    } catch {}
+    window.location.href = '/login'
+  }
 
   async function handleSync() {
     setSyncing(true)
@@ -31,7 +37,6 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
       if (data.analytics > 0) parts.push(data.analytics + ' analytics')
       if (data.playlists > 0) parts.push(data.playlists + ' playlists')
       toast.success(parts.join(', ') || 'Synchronisé !')
-      // Warnings : affichage doux (orange) pour les restrictions connues (chaînes gérées, etc.)
       if (data.warnings && data.warnings.length > 0) {
         data.warnings.forEach((w: { channel: string; reason: string; detail?: string }) => {
           toast(`${w.channel} : ${w.reason}`, {
@@ -45,7 +50,6 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
           })
         })
       }
-      // Erreurs "vraies" (pas déjà couvertes par les warnings)
       if (data.errors && data.errors.length > 0) {
         const warningMessages = new Set((data.warnings || []).map((w: any) => w.detail))
         const realErrors = data.errors.filter((e: string) => !Array.from(warningMessages).some((wm: any) => wm && e.includes(wm)))
@@ -69,6 +73,7 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
   ]
 
   const sections = Array.from(new Set(navItems.map(i => i.section)))
+  const initial = (email && email[0] ? email[0] : 'S').toUpperCase()
 
   return (
     <aside className="w-[220px] min-w-[220px] flex flex-col h-screen border-r" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--bg-border)' }}>
@@ -78,16 +83,16 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
         <span className="font-bold uppercase tracking-[0.15em]" style={{ color: 'var(--text-primary)', fontSize: '22px' }}>KAIROS</span>
       </div>
 
-      {/* Channel */}
+      {/* Compte connecté */}
       <div className="mx-3 mt-3 p-2.5 rounded-xl border flex items-center gap-2" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)' }}>
         <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ background: 'linear-gradient(135deg, #e63946, #ff6b6b)' }}>
-          {session?.user?.name?.[0]?.toUpperCase() || 'Y'}
+          {initial}
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
-            {session?.user?.name || 'Ma chaîne'}
+            {email || 'Espace SPICA'}
           </div>
-          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>YouTube</div>
+          <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{isAdmin ? 'Super-admin' : 'Utilisateur'}</div>
         </div>
       </div>
 
@@ -124,30 +129,34 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
           {theme === 'dark' ? 'Mode clair' : 'Mode sombre'}
         </button>
 
-        {/* Settings */}
-        <button
-          onClick={() => { window.location.href = '/settings/channels' }}
-          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs hover:opacity-80 transition-opacity"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          <Settings size={12} />
-          Paramètres
-        </button>
-        {/* Sync */}
-        <button onClick={handleSync} disabled={syncing}
-          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border text-xs font-medium transition-all"
-          style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)' }}>
-          <RefreshCw size={12} className={syncing ? 'animate-spin' : ''} />
-          {syncing ? (syncStatus || 'Synchronisation...') : syncStatus === 'Terminé' ? 'Synchronisé ✓' : 'Synchroniser YouTube'}
-        </button>
-        <button onClick={() => signOut()}
+        {/* Réglages + Synchro : réservés aux super-admins (nécessitent le compte Google) */}
+        {isAdmin && (
+          <>
+            <button
+              onClick={() => { window.location.href = '/settings/channels' }}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs hover:opacity-80 transition-opacity"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              <Settings size={12} />
+              Paramètres
+            </button>
+            <button onClick={handleSync} disabled={syncing}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border text-xs font-medium transition-all"
+              style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)' }}>
+              <RefreshCw size={12} className={syncing ? 'animate-spin' : ''} />
+              {syncing ? (syncStatus || 'Synchronisation...') : syncStatus === 'Terminé' ? 'Synchronisé ✓' : 'Synchroniser YouTube'}
+            </button>
+          </>
+        )}
+
+        <button onClick={handleLogout}
           className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs transition-all"
           style={{ color: 'var(--text-muted)' }}>
           <LogOut size={12} />
           Déconnexion
         </button>
-            <ChannelSelector />
-</div>
+        <ChannelSelector />
+      </div>
     </aside>
   )
 }

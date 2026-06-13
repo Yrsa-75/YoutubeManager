@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth/options'
 import { createClient } from '@supabase/supabase-js'
+import { getWorkspaceUserId } from '@/lib/gate/session'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,11 +9,10 @@ const supabase = createClient(
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session?.userId) {
+    const userId = await getWorkspaceUserId()
+    if (!userId) {
       return NextResponse.json({ videos: [], total: 0, page: 1, limit: 50 })
     }
-    const userId = session.userId
 
     const { searchParams } = new URL(req.url)
     const search = searchParams.get('search') || ''

@@ -1,55 +1,42 @@
 'use client'
-import { useSession, signIn } from 'next-auth/react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Sidebar from '@/components/layout/Sidebar'
 import TopBar from '@/components/layout/TopBar'
 import VideoTable from '@/components/videos/VideoTable'
 import PendingTable from '@/components/pending/PendingTable'
 import ColorRulesEditor from '@/components/color-rules/ColorRulesEditor'
-import { Loader2 } from 'lucide-react'
 
 export type TabType = 'uploaded' | 'pending' | 'rules'
 
 export default function Dashboard() {
-  const { data: session, status } = useSession()
   const [activeTab, setActiveTab] = useState<TabType>('uploaded')
   const [searchQuery, setSearchQuery] = useState('')
   const [searchField, setSearchField] = useState('all')
+  const [role, setRole] = useState<'superadmin' | 'user' | null>(null)
+  const [email, setEmail] = useState<string>('')
 
-  if (status === 'loading') {
-    return (
-      <div className="flex items-center justify-center h-screen" style={{ background: 'var(--bg-primary)' }}>
-        <Loader2 className="animate-spin" style={{ color: 'var(--accent-red)' }} size={32} />
-      </div>
-    )
-  }
-
-  if (!session) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen gap-6" style={{ background: 'var(--bg-primary)' }}>
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-7 rounded-lg flex items-center justify-center" style={{ background: 'var(--accent-red)' }}>
-            <div className="w-0 h-0 border-t-[7px] border-t-transparent border-b-[7px] border-b-transparent border-l-[12px] border-l-white ml-1" />
-          </div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Youtube<span style={{ color: 'var(--accent-red)' }}>Manager</span>
-          </h1>
-        </div>
-        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Connectez votre compte YouTube pour continuer</p>
-        <button
-          onClick={() => signIn('google')}
-          className="px-6 py-3 hover:opacity-90 text-white rounded-xl font-semibold text-sm transition-colors"
-          style={{ background: 'var(--accent-red)' }}
-        >
-          Se connecter avec Google
-        </button>
-      </div>
-    )
-  }
+  // L'accès est garanti par le middleware (rideau). On récupère juste
+  // l'email et le rôle pour personnaliser l'interface.
+  useEffect(() => {
+    fetch('/api/gate/me')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.user) {
+          setRole(d.user.role)
+          setEmail(d.user.email || '')
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        isAdmin={role === 'superadmin'}
+        email={email}
+      />
       <div className="flex flex-col flex-1 overflow-hidden">
         <TopBar
           activeTab={activeTab}

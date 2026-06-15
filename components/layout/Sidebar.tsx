@@ -76,10 +76,15 @@ export default function Sidebar({ activeTab, setActiveTab, isAdmin = false, emai
 
   return (
     <aside className="w-[220px] min-w-[220px] flex flex-col h-screen border-r" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--bg-border)' }}>
-      {/* Logo KAIROS */}
-      <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b" style={{ borderColor: 'var(--bg-border)' }}>
-        <img src="/kairos-logo.png" alt="KAIROS" width={36} height={36} style={{ borderRadius: 6 }} />
-        <span className="font-bold uppercase tracking-[0.15em]" style={{ color: 'var(--text-primary)', fontSize: '22px' }}>KAIROS</span>
+      {/* Logo SPICA Manager */}
+      <div className="flex items-center gap-2.5 px-5 pt-5 pb-4 border-b" style={{ borderColor: 'var(--bg-border)' }}>
+        <div style={{ width: 34, height: 34, borderRadius: 8, background: 'var(--accent-red)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <span style={{ color: '#fff', fontWeight: 800, fontSize: 18, lineHeight: 1 }}>S</span>
+        </div>
+        <div style={{ lineHeight: 1.15 }}>
+          <div style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 15, letterSpacing: '0.02em' }}>SPICA</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase' }}>Manager</div>
+        </div>
       </div>
 
       {/* Compte connecté */}

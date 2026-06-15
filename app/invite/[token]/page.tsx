@@ -57,8 +57,10 @@ export default function InviteAcceptPage() {
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--bg-primary)' }}>
       <div className="max-w-md w-full rounded-xl p-6 border" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)' }}>
         <div className="flex items-center gap-2 mb-4">
-          <img src="/kairos-logo.png" alt="KAIROS" className="w-8 h-8" />
-          <span className="font-bold tracking-wider" style={{ color: 'var(--text-primary)' }}>KAIROS</span>
+          <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--accent-red)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ color: '#fff', fontWeight: 800, fontSize: 16, lineHeight: 1 }}>S</span>
+          </div>
+          <span className="font-bold tracking-wider" style={{ color: 'var(--text-primary)' }}>SPICA Manager</span>
         </div>
 
         {success ? (
@@ -68,7 +70,7 @@ export default function InviteAcceptPage() {
               <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{success}</p>
             </div>
             <button onClick={() => router.push('/dashboard')} className="w-full px-4 py-2 rounded text-sm font-medium" style={{ background: 'var(--accent)', color: 'white' }}>
-              Accéder à KAIROS <ArrowRight size={14} className="inline ml-1" />
+              Accéder à SPICA Manager <ArrowRight size={14} className="inline ml-1" />
             </button>
           </div>
         ) : error ? (
@@ -80,7 +82,7 @@ export default function InviteAcceptPage() {
           <>
             <h1 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Demande d accès à votre chaîne YouTube</h1>
             <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
-              <strong>{invite.invited_by_name || 'Un utilisateur KAIROS'}</strong> souhaite pouvoir analyser les statistiques de votre chaîne <strong>{invite.channel_title || invite.channel_id}</strong> dans KAIROS.
+              <strong>{invite.invited_by_name || 'Un utilisateur SPICA Manager'}</strong> souhaite pouvoir analyser les statistiques de votre chaîne <strong>{invite.channel_title || invite.channel_id}</strong> dans SPICA Manager.
             </p>
             <div className="rounded-lg p-3 text-xs mb-4" style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}>
               <Crown size={12} className="inline mr-1" style={{ color: '#facc15' }} />

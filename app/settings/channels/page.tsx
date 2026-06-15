@@ -272,7 +272,7 @@ function DeleteChannelModal({
         </div>
 
         <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
-          Cette action retirera votre accès à cette chaîne dans KAIROS :
+          Cette action retirera votre accès à cette chaîne dans SPICA Manager :
         </p>
         <ul className="text-sm space-y-1.5 mb-4 pl-2" style={{ color: 'var(--text-secondary)' }}>
           <li>• Votre autorisation YouTube sera révoquée côté Google</li>

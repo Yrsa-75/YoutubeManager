@@ -8,6 +8,10 @@
     {
       "path": "/api/youtube/classify-shorts",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/youtube/sync-cron",
+      "schedule": "0 */12 * * *"
     }
   ]
 }

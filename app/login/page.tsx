@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, Lock } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -56,13 +56,13 @@ export default function LoginPage() {
             className="w-12 h-12 rounded-xl flex items-center justify-center mb-3"
             style={{ background: 'var(--accent-red)' }}
           >
-            <Lock size={22} color="#fff" />
+            <span style={{ color: '#fff', fontWeight: 800, fontSize: 24, lineHeight: 1 }}>S</span>
           </div>
           <h1
-            className="font-bold uppercase tracking-[0.15em]"
-            style={{ color: 'var(--text-primary)', fontSize: 20 }}
+            className="font-bold"
+            style={{ color: 'var(--text-primary)', fontSize: 19, letterSpacing: '0.01em' }}
           >
-            KAIROS
+            SPICA Manager
           </h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
             Accès réservé

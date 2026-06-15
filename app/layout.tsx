@@ -7,10 +7,10 @@ import { Toaster } from 'react-hot-toast'
 const dmSans = DM_Sans({ subsets: ['latin'], variable: '--font-dm-sans' })
 
 export const metadata: Metadata = {
-  title: 'YoutubeManager',
+  title: 'SPICA Manager',
   description: 'Gérez votre catalogue YouTube comme un pro',
   icons: {
-    icon: '/favicon.png',
+    icon: '/favicon.svg',
   },
 }
 

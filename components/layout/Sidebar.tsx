@@ -1,5 +1,5 @@
 'use client'
-import { Play, Clock, Palette, RefreshCw, LogOut, BarChart2, Sun, Moon, Settings } from 'lucide-react'
+import { Play, Clock, Palette, RefreshCw, LogOut, Sun, Moon, Settings } from 'lucide-react'
 import type { TabType } from '@/types'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
@@ -69,7 +69,6 @@ export default function Sidebar({ activeTab, setActiveTab, isAdmin = false, emai
     { id: 'uploaded', icon: Play, label: 'Vidéos uploadées', section: 'Catalogue' },
     { id: 'pending', icon: Clock, label: 'À uploader', section: 'Catalogue' },
     { id: 'rules', icon: Palette, label: 'Filtres', section: 'Outils' },
-    { id: null, icon: BarChart2, label: 'Analytics (bientôt)', section: 'Outils' },
   ]
 
   const sections = Array.from(new Set(navItems.map(i => i.section)))

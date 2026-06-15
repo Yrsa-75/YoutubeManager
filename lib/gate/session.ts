@@ -15,6 +15,12 @@ export async function getGateUser(): Promise<GateUser | null> {
   return await verifyGateToken(token)
 }
 
+// Renvoie le compte courant uniquement s'il est super-admin (sinon null)
+export async function getSuperadmin(): Promise<GateUser | null> {
+  const u = await getGateUser()
+  return u && u.role === 'superadmin' ? u : null
+}
+
 // Renvoie l'identifiant à utiliser pour lire/écrire les données :
 //  - si on est passé par le rideau  -> l'espace SPICA partagé
 //  - sinon, repli sur une vraie session Google (cas admin qui connecte YouTube)

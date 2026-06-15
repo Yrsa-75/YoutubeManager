@@ -20,7 +20,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from('app_users')
-    .select('id, email, role, is_active, last_login_at, created_at')
+    .select('id, email, role, is_active, is_protected, last_login_at, created_at')
     .order('created_at', { ascending: true })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ users: data || [] })

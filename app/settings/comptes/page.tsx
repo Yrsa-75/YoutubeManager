@@ -1,13 +1,14 @@
 'use client'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Plus, KeyRound, Power, Copy, Shield, User as UserIcon, X, Loader2, RefreshCw } from 'lucide-react'
+import { Plus, KeyRound, Power, Copy, Shield, User as UserIcon, X, Loader2, RefreshCw, Lock } from 'lucide-react'
 
 type Account = {
   id: string
   email: string
   role: 'superadmin' | 'user'
   is_active: boolean
+  is_protected: boolean
   last_login_at: string | null
   created_at: string
 }
@@ -32,6 +33,7 @@ export default function ComptesPage() {
   const [users, setUsers] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [meEmail, setMeEmail] = useState('')
 
   // Ajout
   const [addOpen, setAddOpen] = useState(false)
@@ -63,6 +65,13 @@ export default function ComptesPage() {
   }
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    fetch('/api/gate/me')
+      .then((r) => r.json())
+      .then((d) => { if (d?.user?.email) setMeEmail(d.user.email) })
+      .catch(() => {})
+  }, [])
 
   function copy(text: string) {
     navigator.clipboard.writeText(text).then(
@@ -251,7 +260,12 @@ export default function ComptesPage() {
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} className="border-t" style={{ borderColor: 'var(--bg-border)' }}>
-                  <td className="px-4 py-3" style={{ color: 'var(--text-primary)' }}>{u.email}</td>
+                  <td className="px-4 py-3" style={{ color: 'var(--text-primary)' }}>
+                    <span className="inline-flex items-center gap-1.5">
+                      {u.email}
+                      {u.is_protected && <Lock size={12} style={{ color: 'var(--text-muted)' }} />}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium"
                       style={u.role === 'superadmin'
@@ -268,6 +282,13 @@ export default function ComptesPage() {
                   </td>
                   <td className="px-4 py-3 hidden md:table-cell text-xs" style={{ color: 'var(--text-muted)' }}>{formatDate(u.last_login_at)}</td>
                   <td className="px-4 py-3">
+                    {(u.is_protected && u.email !== meEmail) ? (
+                      <div className="flex items-center justify-end">
+                        <span className="inline-flex items-center gap-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                          <Lock size={12} /> Compte protégé
+                        </span>
+                      </div>
+                    ) : (
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => { setResetTarget(u); setResetPassword(genPassword()) }}
                         title="Réinitialiser le mot de passe"
@@ -283,6 +304,7 @@ export default function ComptesPage() {
                         {u.is_active ? 'Désactiver' : 'Réactiver'}
                       </button>
                     </div>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -16,6 +16,18 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (!admin) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
 
   const id = params.id
+
+  // Compte propriétaire protégé : seul lui-même peut être modifié, jamais par un autre admin
+  const { data: target } = await supabase
+    .from('app_users')
+    .select('id, is_protected')
+    .eq('id', id)
+    .maybeSingle()
+  if (!target) return NextResponse.json({ error: 'Compte introuvable.' }, { status: 404 })
+  if (target.is_protected && admin.uid !== target.id) {
+    return NextResponse.json({ error: 'Ce compte est protégé : il ne peut pas être modifié par un autre administrateur.' }, { status: 403 })
+  }
+
   const body = await req.json().catch(() => ({} as any))
   const updates: any = { updated_at: new Date().toISOString() }
 

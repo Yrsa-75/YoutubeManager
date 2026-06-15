@@ -54,14 +54,14 @@ function PanelThumb({ video }: { video: Video }) {
 
 export default function VideoDetailPanel({ video, onClose }: Props) {
   const [loading, setLoading] = useState<string | null>(null)
-  const [aiResult, setAiResult] = useState('')
+  const [aiResult, setAiResult] = useState<any>(null)
   const [aiType, setAiType] = useState('')
   const [aiHint, setAiHint] = useState('')
   const [language, setLanguage] = useState('fr')
 
   async function generate(type: 'titles' | 'description') {
     setLoading(type)
-    setAiResult('')
+    setAiResult(null)
     setAiType(type)
     try {
       const res = await fetch('/api/ai/generate', {
@@ -71,7 +71,7 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setAiResult(data.result)
+      setAiResult(data)
     } catch (e: any) {
       toast.error('Erreur IA : ' + e.message)
     } finally {
@@ -79,8 +79,8 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
     }
   }
 
-  function copyResult() {
-    navigator.clipboard.writeText(aiResult)
+  function copyText(t: string) {
+    navigator.clipboard.writeText(t)
     toast.success('Copié !')
   }
 
@@ -311,16 +311,33 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
             />
           </div>
           {aiResult && (
-            <div className="mt-3 rounded-lg border p-3 relative" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)' }}>
-              <div className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
+            <div className="mt-3 flex flex-col gap-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
                 {aiType === 'titles' ? 'Titres générés' : 'Description générée'}
               </div>
-              <pre className="text-xs whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--text-primary)', fontFamily: 'inherit' }}>{aiResult}</pre>
-              <button onClick={copyResult}
-                className="absolute top-2 right-2 w-6 h-6 rounded flex items-center justify-center border transition-all"
-                style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-muted)' }}>
-                <Copy size={10} />
-              </button>
+              {(['gpt', 'claude'] as const).map((key) => {
+                const m = aiResult[key]
+                if (!m) return null
+                return (
+                  <div key={key} className="rounded-lg border p-3 relative" style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)' }}>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: key === 'claude' ? '#d97757' : '#10a37f' }}>
+                      {m.model}
+                    </div>
+                    {m.ok ? (
+                      <>
+                        <pre className="text-xs whitespace-pre-wrap leading-relaxed pr-6" style={{ color: 'var(--text-primary)', fontFamily: 'inherit' }}>{m.result}</pre>
+                        <button onClick={() => copyText(m.result)}
+                          className="absolute top-2 right-2 w-6 h-6 rounded flex items-center justify-center border transition-all"
+                          style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-muted)' }}>
+                          <Copy size={10} />
+                        </button>
+                      </>
+                    ) : (
+                      <p className="text-xs" style={{ color: 'var(--accent-red)' }}>{m.error}</p>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

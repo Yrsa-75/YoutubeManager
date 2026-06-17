@@ -12,6 +12,7 @@ const FIELD_OPTIONS = [
   { value: 'average_view_duration', label: 'Durée moy. de visionnage (sec)' },
   { value: 'average_view_percentage', label: 'Pourcentage moyen visionné' },
   { value: 'estimated_minutes_watched', label: 'Durée de visionnage (min)' },
+  { value: 'estimated_revenue', label: 'Revenus estimés (€)' },
   { value: 'shares', label: 'Partages' },
   { value: 'subscribers_gained', label: 'Abonnés gagnés' },
   { value: 'subscribers_lost', label: 'Abonnés perdus' },

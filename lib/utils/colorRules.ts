@@ -37,6 +37,7 @@ function matchesCondition(video: Video, cond: any): boolean {
     case 'average_view_duration': fieldValue = video.average_view_duration || 0; break
     case 'average_view_percentage': fieldValue = video.average_view_percentage || 0; break
     case 'estimated_minutes_watched': fieldValue = video.estimated_minutes_watched || 0; break
+    case 'estimated_revenue': fieldValue = video.estimated_revenue || 0; break
     case 'shares': fieldValue = video.shares || 0; break
     case 'subscribers_gained': fieldValue = video.subscribers_gained || 0; break
     case 'subscribers_lost': fieldValue = video.subscribers_lost || 0; break

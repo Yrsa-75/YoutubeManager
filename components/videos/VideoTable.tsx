@@ -128,6 +128,17 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
   // Map channel_id -> { analytics_available, title, access_role }
   const [channelsMap, setChannelsMap] = useState<Map<string, { analytics_available: boolean; title: string; access_role?: string }>>(new Map())
 
+  // --- Mode "filtre global" ---
+  // Quand un filtre couleur ou avancé est actif, on charge TOUTES les vidéos (toutes les pages)
+  // pour filtrer sur l'ensemble du catalogue, et plus seulement sur la page affichée.
+  const [allVideos, setAllVideos] = useState<Video[] | null>(null)
+  const [allLoading, setAllLoading] = useState(false)
+  const allVideosKeyRef = useRef('')
+  const [refreshNonce, setRefreshNonce] = useState(0)
+  const filterMode = !!colorFilter || advancedFilters.length > 0
+  // Signature des filtres serveur : si elle change, le cache "toutes les vidéos" est invalidé.
+  const serverFilterKey = [searchQuery, searchField, sortBy, sortDir, statusFilter, formatFilter].join('|')
+
   // Load persisted column config on mount
   useEffect(() => {
     loadColumnConfig()
@@ -135,7 +146,7 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
   }, [])
 
   useEffect(() => {
-    const h = () => fetchVideos()
+    const h = () => { fetchVideos(); allVideosKeyRef.current = ''; setRefreshNonce(n => n + 1) }
     window.addEventListener('refresh-videos', h)
     return () => window.removeEventListener('refresh-videos', h)
   }, [])
@@ -143,8 +154,9 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
   // Règles de couleur : chargées une fois (indépendantes des filtres/pagination)
   useEffect(() => { fetchColorRules() }, [])
 
-  // Changement de page → recharger cette page
-  useEffect(() => { fetchVideos() }, [page])
+  // Changement de page → recharger cette page (uniquement hors mode filtre global :
+  // en mode filtre, tout est déjà en mémoire, on change seulement la tranche affichée)
+  useEffect(() => { if (!filterMode) fetchVideos() }, [page])
 
   // Changement de tri / filtre / recherche / taille de page → revenir page 1
   // (ou recharger directement si on est déjà page 1). Ignoré au tout premier rendu
@@ -155,10 +167,30 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
     else fetchVideos()
   }, [searchQuery, searchField, sortBy, sortDir, statusFilter, formatFilter, pageSize])
 
+  // Entrée/sortie du mode filtre global → revenir page 1 (évite une page hors limites)
+  useEffect(() => { setPage(1) }, [filterMode])
+
+  // En mode filtre global : charger TOUTES les vidéos (toutes les pages) du filtre serveur courant.
+  // Mise en cache via allVideosKeyRef : on ne recharge que si les filtres serveur/tri changent,
+  // ou après une synchro/refresh (refreshNonce). Toggler un filtre couleur ne recharge rien.
+  useEffect(() => {
+    if (!filterMode) return
+    if (allVideos && allVideosKeyRef.current === serverFilterKey) return
+    let cancelled = false
+    setAllLoading(true)
+    fetchAllVideos()
+      .then(all => { if (!cancelled) { setAllVideos(all); allVideosKeyRef.current = serverFilterKey } })
+      .catch(e => { if (!cancelled) console.error(e) })
+      .finally(() => { if (!cancelled) setAllLoading(false) })
+    return () => { cancelled = true }
+  }, [filterMode, serverFilterKey, refreshNonce])
+
   useEffect(() => {
     const handler = () => {
       fetchVideos()
       loadChannelsMeta()
+      allVideosKeyRef.current = ''
+      setRefreshNonce(n => n + 1)
     }
     window.addEventListener('youtube-sync-done', handler)
     return () => window.removeEventListener('youtube-sync-done', handler)
@@ -375,16 +407,28 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
     return result
   }, [colorFilter, advancedFilters])
 
+  // Source des vidéos : en mode filtre global, tout le catalogue ; sinon, la page serveur courante.
+  const sourceVideos = filterMode ? (allVideos || []) : videos
+
   const videosWithColors = useMemo<VideoWithColor[]>(
-    () => videos.map(augmentVideo),
-    [videos, augmentVideo]
+    () => sourceVideos.map(augmentVideo),
+    [sourceVideos, augmentVideo]
   )
 
-  // Filtres côté client appliqués à la page chargée
-  const filteredVideos = useMemo(
+  // Filtres couleur + avancés appliqués sur la source (= toutes les pages en mode filtre)
+  const filteredAll = useMemo(
     () => applyClientFilters(videosWithColors),
     [videosWithColors, applyClientFilters]
   )
+
+  // Total effectif : nombre de résultats filtrés (mode filtre) ou total serveur (mode normal)
+  const effectiveTotal = filterMode ? filteredAll.length : total
+
+  // Liste affichée : en mode filtre on pagine le résultat filtré côté client ;
+  // en mode normal, la page serveur est déjà la bonne tranche.
+  const filteredVideos = filterMode
+    ? filteredAll.slice((page - 1) * pageSize, page * pageSize)
+    : filteredAll
 
   function handleSort(col: string) {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -394,9 +438,9 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
   const activeColumns = columns.filter(c => c.enabled)
 
   // Pagination (calculs d'affichage)
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-  const fromN = total === 0 ? 0 : (page - 1) * pageSize + 1
-  const toN = Math.min(page * pageSize, total)
+  const totalPages = Math.max(1, Math.ceil(effectiveTotal / pageSize))
+  const fromN = effectiveTotal === 0 ? 0 : (page - 1) * pageSize + 1
+  const toN = Math.min(page * pageSize, effectiveTotal)
   const colorRuleFilters = colorRules.filter(r => r.enabled).slice(0, 4)
   const nonSortable = ['thumbnail_url', 'tags', 'playlists']
 
@@ -649,7 +693,11 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
                 {filteredVideos.length === 0 ? (
                   <tr>
                     <td colSpan={activeColumns.length + 1} className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
-                      {searchQuery || advancedFilters.length > 0 ? 'Aucune vidéo ne correspond aux filtres' : 'Aucune vidéo \u2014 cliquez sur "Synchroniser YouTube" pour commencer'}
+                      {filterMode && allLoading
+                        ? 'Recherche sur toutes les pages\u2026'
+                        : (searchQuery || colorFilter || advancedFilters.length > 0
+                          ? 'Aucune vidéo ne correspond aux filtres'
+                          : 'Aucune vidéo \u2014 cliquez sur "Synchroniser YouTube" pour commencer')}
                     </td>
                   </tr>
                 ) : filteredVideos.map(video => {
@@ -714,9 +762,13 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
       {/* Status bar */}
       <div className="flex items-center px-5 py-1.5 border-t gap-4 shrink-0" style={{ borderColor: 'var(--bg-border)', background: 'var(--bg-secondary)' }}>
         <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-          {total === 0 ? '0 vidéo' : `${formatNumber(fromN)}–${formatNumber(toN)} sur ${formatNumber(total)}`}
+          {effectiveTotal === 0 ? '0 vidéo' : `${formatNumber(fromN)}–${formatNumber(toN)} sur ${formatNumber(effectiveTotal)}`}
         </span>
-        {(colorFilter || advancedFilters.length > 0) && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{filteredVideos.length} filtrées sur cette page</span>}
+        {filterMode && (
+          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            {allLoading ? 'Recherche sur toutes les pages\u2026' : `${formatNumber(effectiveTotal)} résultat${effectiveTotal > 1 ? 's' : ''} (toutes pages)`}
+          </span>
+        )}
 
         <div className="flex items-center gap-2 ml-auto">
           <label className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Par page</label>
@@ -733,18 +785,18 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
 
           <button
             onClick={() => setPage(p => Math.max(1, p - 1))}
-            disabled={page <= 1 || loading}
+            disabled={page <= 1 || loading || allLoading}
             className="text-[11px] px-2 py-0.5 rounded border transition-all"
-            style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)', opacity: (page <= 1 || loading) ? 0.4 : 1, cursor: (page <= 1 || loading) ? 'default' : 'pointer' }}
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)', opacity: (page <= 1 || loading || allLoading) ? 0.4 : 1, cursor: (page <= 1 || loading || allLoading) ? 'default' : 'pointer' }}
           >‹ Précédent</button>
 
           <span className="text-[11px] tabular-nums" style={{ color: 'var(--text-secondary)' }}>Page {page} / {totalPages}</span>
 
           <button
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages || loading}
+            disabled={page >= totalPages || loading || allLoading}
             className="text-[11px] px-2 py-0.5 rounded border transition-all"
-            style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)', opacity: (page >= totalPages || loading) ? 0.4 : 1, cursor: (page >= totalPages || loading) ? 'default' : 'pointer' }}
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)', opacity: (page >= totalPages || loading || allLoading) ? 0.4 : 1, cursor: (page >= totalPages || loading || allLoading) ? 'default' : 'pointer' }}
           >Suivant ›</button>
         </div>
       </div>

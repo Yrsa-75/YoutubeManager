@@ -123,11 +123,13 @@ export async function POST() {
 
 // PUT: toggle is_selected
 export async function PUT(req: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session?.userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  // Identité = espace partagé SPICA (via le rideau), comme le GET et l'API videos.
+  // Auparavant on écrivait avec session.userId (compte Google individuel), ce qui
+  // mettait à jour les mauvaises lignes : le filtre ne répondait jamais au clic.
+  const userId = await getWorkspaceUserId()
+  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const { channelId, isSelected } = await req.json()
-  const userId = session.userId
 
   const { error: accessError } = await supabase
     .from('channel_access')

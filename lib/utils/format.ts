@@ -23,13 +23,22 @@ export function formatDate(dateStr: string): string {
 }
 
 export function formatDuration(iso8601: string): string {
-  if (!iso8601) return '\u2014'
-  const match = iso8601.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
+  if (!iso8601) return '—'
+  // Gère PT…H…M…S, le préfixe jours (P…DT…) et P0D (live sans durée -> tiret).
+  const match = iso8601.match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/)
   if (!match) return iso8601
-  const h = match[1] ? match[1] + 'h' : ''
-  const m = match[2] ? match[2] + 'm' : ''
-  const s = match[3] ? match[3] + 's' : ''
-  return [h, m, s].filter(Boolean).join(' ') || '0s'
+  const days = parseInt(match[1] || '0', 10)
+  const hours = parseInt(match[2] || '0', 10)
+  const mins = parseInt(match[3] || '0', 10)
+  const secs = parseInt(match[4] || '0', 10)
+  const total = days * 86400 + hours * 3600 + mins * 60 + secs
+  if (total === 0) return '—'
+  const parts: string[] = []
+  if (days) parts.push(days + 'j')
+  if (hours) parts.push(hours + 'h')
+  if (mins) parts.push(mins + 'm')
+  if (secs) parts.push(secs + 's')
+  return parts.join(' ')
 }
 
 // Format seconds to mm:ss or hh:mm:ss

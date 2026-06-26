@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
     // La colonne "Date de publication" (clé 'publication') est calculee :
     // date programmee si presente, sinon date reelle. On trie sur la colonne
     // generee publication_date = COALESCE(scheduled_publish_at, published_at).
-    const SORT_MAP: Record<string, string> = { publication: 'publication_date', format: 'is_short' }
+    const SORT_MAP: Record<string, string> = { publication: 'publication_date', format: 'is_short', duration: 'duration_seconds' }
     const sortColumn = SORT_MAP[sortBy] || sortBy
     query = query.order(sortColumn, { ascending: sortDir === 'asc' })
     query = query.range(offset, offset + limit - 1)

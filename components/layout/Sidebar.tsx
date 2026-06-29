@@ -1,7 +1,7 @@
 'use client'
 import { Play, Clock, Palette, RefreshCw, LogOut, Sun, Moon, Settings } from 'lucide-react'
 import type { TabType } from '@/types'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
 import { useTheme } from '@/hooks/useTheme'
 import ChannelSelector from '@/components/channels/ChannelSelector'
@@ -13,10 +13,36 @@ interface Props {
   email?: string
 }
 
+// Affichage relatif de la derniere synchro ("il y a 5 min").
+function formatRelative(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return "à l'instant"
+  if (min < 60) return `il y a ${min} min`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `il y a ${h} h`
+  return `il y a ${Math.floor(h / 24)} j`
+}
+
 export default function Sidebar({ activeTab, setActiveTab, isAdmin = false, email = '' }: Props) {
   const [syncing, setSyncing] = useState(false)
-  const [syncStatus, setSyncStatus] = useState<string | null>(null)
+  const [lastSync, setLastSync] = useState<string | null>(null)
   const { theme, toggleTheme } = useTheme()
+
+  async function loadSyncStatus() {
+    try {
+      const res = await fetch('/api/youtube/sync-status')
+      const data = await res.json()
+      setLastSync(data.last_synced_at || null)
+    } catch {}
+  }
+
+  useEffect(() => {
+    loadSyncStatus()
+    const onDone = () => loadSyncStatus()
+    window.addEventListener('youtube-sync-done', onDone)
+    return () => window.removeEventListener('youtube-sync-done', onDone)
+  }, [])
 
   async function handleLogout() {
     try {
@@ -25,43 +51,30 @@ export default function Sidebar({ activeTab, setActiveTab, isAdmin = false, emai
     window.location.href = '/login'
   }
 
+  // Rafraichir = passe metadonnees legere (sync-cron). L'analytics (CA, watchtime)
+  // se complete en tache de fond via le cron analytics-batch. Plus de timeout.
   async function handleSync() {
     setSyncing(true)
-    setSyncStatus('Vidéos...')
     try {
-      const res = await fetch('/api/youtube/sync-all', { method: 'POST' })
+      const res = await fetch('/api/youtube/sync-cron', { method: 'POST' })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      const parts = []
-      if (data.videos > 0) parts.push(data.videos + ' vidéos')
-      if (data.analytics > 0) parts.push(data.analytics + ' analytics')
-      if (data.playlists > 0) parts.push(data.playlists + ' playlists')
-      toast.success(parts.join(', ') || 'Synchronisé !')
-      if (data.warnings && data.warnings.length > 0) {
-        data.warnings.forEach((w: { channel: string; reason: string; detail?: string }) => {
-          toast(`${w.channel} : ${w.reason}`, {
+      if (!res.ok || data.ok === false) throw new Error(data.error || 'Échec de la synchronisation')
+      toast.success(data.videos > 0 ? `${data.videos} vidéos synchronisées` : 'À jour !')
+      if (data.errors && data.errors.length > 0) {
+        data.errors.forEach((e: string) =>
+          toast(e, {
             duration: 7000,
             icon: '⚠️',
-            style: {
-              background: 'var(--bg-card)',
-              color: 'var(--text-primary)',
-              border: '1px solid #f59e0b',
-            },
+            style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid #f59e0b' },
           })
-        })
+        )
       }
-      if (data.errors && data.errors.length > 0) {
-        const warningMessages = new Set((data.warnings || []).map((w: any) => w.detail))
-        const realErrors = data.errors.filter((e: string) => !Array.from(warningMessages).some((wm: any) => wm && e.includes(wm)))
-        realErrors.forEach((e: string) => toast.error(e, { duration: 5000 }))
-      }
-      setSyncStatus('Terminé')
       window.dispatchEvent(new CustomEvent('youtube-sync-done'))
     } catch (e: any) {
       toast.error('Erreur sync : ' + e.message)
-      setSyncStatus(null)
     } finally {
       setSyncing(false)
+      loadSyncStatus()
     }
   }
 
@@ -133,7 +146,7 @@ export default function Sidebar({ activeTab, setActiveTab, isAdmin = false, emai
           {theme === 'dark' ? 'Mode clair' : 'Mode sombre'}
         </button>
 
-        {/* Réglages + Synchro : réservés aux super-admins (nécessitent le compte Google) */}
+        {/* Réglages + Rafraîchir : réservés aux super-admins */}
         {isAdmin && (
           <>
             <button
@@ -148,8 +161,11 @@ export default function Sidebar({ activeTab, setActiveTab, isAdmin = false, emai
               className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border text-xs font-medium transition-all"
               style={{ background: 'var(--bg-hover)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)' }}>
               <RefreshCw size={12} className={syncing ? 'animate-spin' : ''} />
-              {syncing ? (syncStatus || 'Synchronisation...') : syncStatus === 'Terminé' ? 'Synchronisé ✓' : 'Synchroniser YouTube'}
+              {syncing ? 'Synchronisation…' : 'Rafraîchir'}
             </button>
+            <div className="text-[10px] text-center" style={{ color: 'var(--text-muted)' }}>
+              {syncing ? 'Mise à jour en cours…' : lastSync ? `À jour · ${formatRelative(lastSync)}` : 'Jamais synchronisé'}
+            </div>
           </>
         )}
 

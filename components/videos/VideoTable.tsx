@@ -33,6 +33,7 @@ const COLOR_BG: Record<string, string> = {
 const DEFAULT_COLUMNS = [
   { key: 'thumbnail_url', label: 'Miniature', enabled: true, width: 60 },
   { key: 'youtube_id', label: 'ID', enabled: true },
+  { key: 'custom_id', label: 'ID Perso', enabled: true },
   { key: 'title', label: 'Titre', enabled: true },
   { key: 'format', label: 'Format', enabled: true },
   { key: 'status', label: 'Visibilité', enabled: true },
@@ -488,6 +489,10 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
         return <VideoThumb video={video} />
       case 'youtube_id':
         return <span className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>{video.youtube_id}</span>
+      case 'custom_id':
+        return video.custom_id
+          ? <span className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>{video.custom_id}</span>
+          : <span style={{ color: 'var(--text-muted)' }}>—</span>
       case 'title':
         return <span className="font-medium truncate block max-w-[240px]" style={{ color: 'var(--text-primary)' }}>{video.title}</span>
       case 'status': {

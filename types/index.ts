@@ -1,6 +1,9 @@
 export interface Video {
   id: string
   youtube_id: string
+  // ID Perso : identifiant Content Owner (custom_id Watch4), importé depuis l'export Excel.
+  // NULL tant qu'aucun import n'a renseigné la vidéo.
+  custom_id?: string | null
   title: string
   description: string
   thumbnail_url: string

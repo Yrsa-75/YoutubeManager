@@ -29,6 +29,7 @@ async function fetchVideoAnalytics(
     url.searchParams.set('startDate', startDate)
     url.searchParams.set('endDate', endDate)
     url.searchParams.set('metrics', metrics)
+    url.searchParams.set('currency', 'EUR')
     url.searchParams.set('filters', `video==${videoId}`)
     const r = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
     const d = await r.json()

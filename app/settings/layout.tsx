@@ -7,6 +7,7 @@ import { ArrowLeft, Loader2 } from 'lucide-react'
 const TABS = [
   { id: 'channels', label: 'Chaînes', href: '/settings/channels' },
   { id: 'comptes', label: 'Comptes', href: '/settings/comptes' },
+  { id: 'id-perso', label: 'ID Perso', href: '/settings/id-perso' },
 ]
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {

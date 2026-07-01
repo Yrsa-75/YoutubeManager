@@ -56,11 +56,14 @@ export async function GET(req: NextRequest) {
     if (channelIds) {
       const ids = channelIds.split(',').filter(Boolean)
       if (ids.length > 0) query = query.in('channel_id', ids)
-    } else if (hasAccessEntries && selectedChannelIds.length > 0) {
-      // Auto-filter sur chaînes sélectionnées dans channel_access
-      query = query.in('channel_id', selectedChannelIds)
-    } else if (!hasAccessEntries) {
-      // Fallback legacy : anciennes chaînes is_selected=true
+    } else if (hasAccessEntries) {
+      // Auto-filter sur les chaînes cochées dans channel_access.
+      // Cas important : si AUCUNE chaîne n'est cochée, on ne renvoie AUCUNE vidéo
+      // (et non tout le catalogue). La valeur sentinelle '__none__' ne correspond
+      // à aucun channel_id réel : elle garantit un résultat vide de façon fiable.
+      query = query.in('channel_id', selectedChannelIds.length > 0 ? selectedChannelIds : ['__none__'])
+    } else {
+      // Fallback legacy (aucune entrée channel_access) : anciennes chaînes is_selected=true
       const { data: selChannels } = await supabase
         .from('channels')
         .select('channel_id')

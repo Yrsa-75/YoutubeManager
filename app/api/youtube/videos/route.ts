@@ -85,8 +85,11 @@ export async function GET(req: NextRequest) {
         query = query.ilike('description', `%${safe}%`)
       } else if (searchField === 'tags') {
         query = query.ilike('tags_text', `%${safe}%`)
+      } else if (searchField === 'id') {
+        // Champ "ID" : ID YouTube OU ID Perso (custom_id importé de Watch4)
+        query = query.or(`youtube_id.ilike.%${safe}%,custom_id.ilike.%${safe}%`)
       } else {
-        query = query.or(`title.ilike.%${safe}%,description.ilike.%${safe}%,tags_text.ilike.%${safe}%,youtube_id.ilike.%${safe}%`)
+        query = query.or(`title.ilike.%${safe}%,description.ilike.%${safe}%,tags_text.ilike.%${safe}%,youtube_id.ilike.%${safe}%,custom_id.ilike.%${safe}%`)
       }
     }
     if (status) query = query.eq('status', status)

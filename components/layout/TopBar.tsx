@@ -19,12 +19,14 @@ const TAB_TITLES: Record<TabType, string> = {
 const SEARCH_FIELDS = [
   { key: 'all', label: 'Tout' },
   { key: 'title', label: 'Titre' },
+  { key: 'id', label: 'ID' },
   { key: 'description', label: 'Description' },
   { key: 'tags', label: 'Tags' },
 ]
 
 const PLACEHOLDERS: Record<string, string> = {
-  all: 'Titre, ID, description, tags...',
+  all: 'Titre, ID, ID Perso, description, tags...',
+  id: 'ID YouTube ou ID Perso...',
   title: 'Rechercher dans les titres...',
   description: 'Rechercher dans les descriptions...',
   tags: 'Rechercher dans les tags...',

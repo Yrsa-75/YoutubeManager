@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Sparkles, Plus } from 'lucide-react'
 import type { PendingVideo } from '@/types'
 import ImportZone from './ImportZone'
@@ -15,23 +15,32 @@ const STATUS_OPTIONS = [
   { value: 'validated', label: 'Validé', color: '#22c55e' },
 ]
 
-export default function PendingTable({ searchQuery }: Props) {
+export default function PendingTable({ searchQuery: rawSearchQuery }: Props) {
   const [videos, setVideos] = useState<PendingVideo[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [showAiPanel, setShowAiPanel] = useState<any>(null)
+  // Recherche débouncée (500 ms) + garde anti-course (cf. VideoTable)
+  const [searchQuery, setSearchQuery] = useState(rawSearchQuery)
+  const fetchSeqRef = useRef(0)
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(rawSearchQuery), 500)
+    return () => clearTimeout(t)
+  }, [rawSearchQuery])
 
   useEffect(() => { fetchVideos() }, [searchQuery])
 
   async function fetchVideos() {
+    const reqId = ++fetchSeqRef.current
     setLoading(true)
     try {
       const res = await fetch('/api/pending-videos/import?search=' + encodeURIComponent(searchQuery))
       const data = await res.json()
+      if (reqId !== fetchSeqRef.current) return // réponse obsolète, on l'ignore
       setVideos(data.videos || [])
       setTotal(data.total || 0)
     } catch (e) { console.error(e) }
-    finally { setLoading(false) }
+    finally { if (reqId === fetchSeqRef.current) setLoading(false) }
   }
 
   async function updateStatus(id: string, status: string) {

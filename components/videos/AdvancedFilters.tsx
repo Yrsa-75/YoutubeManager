@@ -13,6 +13,7 @@ const FILTER_FIELDS = [
   { key: 'view_count', label: 'Vues', type: 'number' },
   { key: 'like_count', label: "J'aime", type: 'number' },
   { key: 'comment_count', label: 'Commentaires', type: 'number' },
+  { key: 'duration_minutes', label: 'Durée de la vidéo (min)', type: 'number' },
   { key: 'average_view_duration', label: 'Durée moy. de visionnage (sec)', type: 'number' },
   { key: 'average_view_percentage', label: 'Pourcentage moyen visionné', type: 'number' },
   { key: 'estimated_minutes_watched', label: 'Durée de visionnage (min)', type: 'number' },

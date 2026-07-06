@@ -106,7 +106,20 @@ type VideoWithColor = Video & {
   _channelTitle?: string
 }
 
-export default function VideoTable({ searchQuery, searchField }: Props) {
+// Debounce : ne répercute la valeur qu'après `delay` ms sans nouvelle frappe.
+// Évite un appel API par caractère tapé dans la recherche.
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(t)
+  }, [value, delay])
+  return debounced
+}
+
+export default function VideoTable({ searchQuery: rawSearchQuery, searchField }: Props) {
+  // Recherche débouncée (500 ms) : c'est CETTE valeur qui pilote les requêtes serveur.
+  const searchQuery = useDebouncedValue(rawSearchQuery, 500)
   const [videos, setVideos] = useState<Video[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -126,6 +139,13 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(500)
   const didMountRef = useRef(false)
+  // Numéro de séquence des requêtes de la page courante (garde anti-course)
+  const fetchSeqRef = useRef(0)
+  // Rangée des filtres persos : repli à 2 lignes + détection de débordement
+  const [chipsExpanded, setChipsExpanded] = useState(false)
+  const [chipsOverflow, setChipsOverflow] = useState(false)
+  const chipsRef = useRef<HTMLDivElement>(null)
+  const CHIPS_COLLAPSED_HEIGHT = 64 // 2 lignes : 2 × 28px (h-7) + 8px de gap
   // Map channel_id -> { analytics_available, title, access_role }
   const [channelsMap, setChannelsMap] = useState<Map<string, { analytics_available: boolean; title: string; access_role?: string }>>(new Map())
 
@@ -154,6 +174,19 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
 
   // Règles de couleur : chargées une fois (indépendantes des filtres/pagination)
   useEffect(() => { fetchColorRules() }, [])
+
+  // Détecte si la rangée de filtres persos dépasse 2 lignes (pour afficher "Voir plus").
+  // scrollHeight donne la hauteur réelle du contenu même quand il est tronqué.
+  useEffect(() => {
+    const check = () => {
+      const el = chipsRef.current
+      if (!el) { setChipsOverflow(false); return }
+      setChipsOverflow(el.scrollHeight > CHIPS_COLLAPSED_HEIGHT + 4)
+    }
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [colorRules])
 
   // Changement de page → recharger cette page (uniquement hors mode filtre global :
   // en mode filtre, tout est déjà en mémoire, on change seulement la tranche affichée)
@@ -269,17 +302,22 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
   }, [])
 
   async function fetchVideos() {
+    // Anti-course : chaque appel prend un numéro ; seule la réponse du DERNIER
+    // appel lancé a le droit d'écrire dans l'état. Sans ça, deux requêtes qui
+    // se croisent peuvent afficher les résultats d'une recherche périmée.
+    const reqId = ++fetchSeqRef.current
     setLoading(true)
     try {
       const params = new URLSearchParams({ search: searchQuery, searchField, sortBy, sortDir, status: statusFilter, format: formatFilter, page: String(page), limit: String(pageSize) })
       const res = await fetch('/api/youtube/videos?' + params)
       const data = await res.json()
+      if (reqId !== fetchSeqRef.current) return // réponse obsolète, on l'ignore
       setVideos(data.videos || [])
       setTotal(data.total || 0)
     } catch (e) {
       console.error(e)
     } finally {
-      setLoading(false)
+      if (reqId === fetchSeqRef.current) setLoading(false)
     }
   }
 
@@ -321,6 +359,7 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
         const limited = v._isAnalyticsLimited
         return {
           'ID YouTube': v.youtube_id,
+          'ID Perso': v.custom_id || '',
           'Chaîne': v._channelTitle || '',
           'Titre': v.title,
           'Format': v.is_short === true ? 'Short' : v.is_short === false ? 'Vidéo' : 'À classifier',
@@ -392,7 +431,10 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
       result = result.filter(v => {
         // Si la vidéo est en accès limité ET le filtre porte sur un champ analytics, on l'exclut
         if (v._isAnalyticsLimited && ANALYTICS_FIELDS.has(filter.field)) return false
-        const val = (v as any)[filter.field]
+        // Champ calculé : durée en minutes (depuis duration_seconds, colonne générée en base)
+        const val = filter.field === 'duration_minutes'
+          ? ((v as any).duration_seconds ?? 0) / 60
+          : (v as any)[filter.field]
         if (val == null) return false
         const numVal = Number(val)
         switch (filter.operator) {
@@ -442,7 +484,9 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
   const totalPages = Math.max(1, Math.ceil(effectiveTotal / pageSize))
   const fromN = effectiveTotal === 0 ? 0 : (page - 1) * pageSize + 1
   const toN = Math.min(page * pageSize, effectiveTotal)
-  const colorRuleFilters = colorRules.filter(r => r.enabled).slice(0, 4)
+  // TOUS les filtres persos actifs (plus de limite à 4) : affichés sur leur
+  // propre rangée, repliée à 2 lignes max avec un bouton "Voir plus".
+  const colorRuleFilters = colorRules.filter(r => r.enabled)
   const nonSortable = ['thumbnail_url', 'tags', 'playlists']
 
   // Cellule générique pour les fields analytics indisponibles (mode Manager limité)
@@ -627,23 +671,6 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
           </button>
         ))}
 
-        <div className="w-px h-4 mx-1" style={{ background: 'var(--bg-border)' }} />
-
-        {colorRuleFilters.map(rule => (
-          <button key={rule.id} onClick={() => setColorFilter(colorFilter === rule.color ? '' : rule.color)}
-            className="h-7 px-3 rounded-md text-xs font-medium border transition-all flex items-center gap-1.5"
-            style={{
-              background: colorFilter === rule.color ? rule.color + '20' : 'var(--bg-card)',
-              borderColor: colorFilter === rule.color ? rule.color + '60' : 'var(--bg-border)',
-              color: colorFilter === rule.color ? rule.color : 'var(--text-secondary)'
-            }}>
-            <span className="w-2 h-2 rounded-full" style={{ background: rule.color }} />
-            {rule.name}
-          </button>
-        ))}
-
-
-
         <div className="ml-auto flex items-center gap-2">
           <button onClick={handleExport} disabled={exporting || total === 0}
             className="h-7 px-3 rounded-md text-xs font-medium border flex items-center gap-1.5 transition-all"
@@ -659,6 +686,39 @@ export default function VideoTable({ searchQuery, searchField }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Filtres persos (règles de couleurs) : rangée dédiée, TOUS affichés,
+          repliée à 2 lignes max avec bouton "Voir plus" en cas de débordement */}
+      {colorRuleFilters.length > 0 && (
+        <div className="flex items-start gap-2 px-5 py-2 border-b shrink-0" style={{ borderColor: 'var(--bg-border)', background: 'var(--bg-primary)' }}>
+          <span className="text-[10px] font-semibold uppercase tracking-wider shrink-0" style={{ color: 'var(--text-muted)', lineHeight: '28px' }}>Filtres persos :</span>
+          <div
+            ref={chipsRef}
+            className="flex items-center gap-2 flex-wrap flex-1 min-w-0"
+            style={{ maxHeight: chipsExpanded ? undefined : CHIPS_COLLAPSED_HEIGHT, overflow: 'hidden' }}
+          >
+            {colorRuleFilters.map(rule => (
+              <button key={rule.id} onClick={() => setColorFilter(colorFilter === rule.color ? '' : rule.color)}
+                className="h-7 px-3 rounded-md text-xs font-medium border transition-all flex items-center gap-1.5"
+                style={{
+                  background: colorFilter === rule.color ? rule.color + '20' : 'var(--bg-card)',
+                  borderColor: colorFilter === rule.color ? rule.color + '60' : 'var(--bg-border)',
+                  color: colorFilter === rule.color ? rule.color : 'var(--text-secondary)'
+                }}>
+                <span className="w-2 h-2 rounded-full" style={{ background: rule.color }} />
+                {rule.name}
+              </button>
+            ))}
+          </div>
+          {(chipsOverflow || chipsExpanded) && (
+            <button onClick={() => setChipsExpanded(e => !e)}
+              className="h-7 px-3 rounded-md text-xs font-medium border shrink-0 flex items-center gap-1 transition-all"
+              style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-secondary)' }}>
+              {chipsExpanded ? <><ChevronUp size={11} /> Voir moins</> : <><ChevronDown size={11} /> Voir plus</>}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Table + Panel */}
       <div className="flex flex-1 overflow-hidden">

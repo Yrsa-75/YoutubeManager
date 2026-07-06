@@ -18,6 +18,7 @@ export interface Video {
   scheduled_publish_at?: string | null
   status: 'public' | 'private' | 'unlisted'
   duration: string
+  duration_seconds?: number | null
   tags: string[]
   category_id: string
   view_count: number

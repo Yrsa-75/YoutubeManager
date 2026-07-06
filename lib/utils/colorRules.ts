@@ -30,6 +30,10 @@ function matchesCondition(video: Video, cond: any): boolean {
     case 'view_count': fieldValue = video.view_count; break
     case 'like_count': fieldValue = video.like_count; break
     case 'comment_count': fieldValue = video.comment_count; break
+    case 'duration_minutes':
+      // duration_seconds = colonne générée en base (conversion de la durée ISO 8601)
+      fieldValue = (video.duration_seconds || 0) / 60
+      break
     case 'days_since_upload':
       try { fieldValue = differenceInDays(new Date(), parseISO(video.published_at)) } catch { fieldValue = 0 }
       break

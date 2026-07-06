@@ -8,6 +8,7 @@ const FIELD_OPTIONS = [
   { value: 'view_count', label: 'Vues totales' },
   { value: 'like_count', label: "J'aime" },
   { value: 'comment_count', label: 'Commentaires' },
+  { value: 'duration_minutes', label: 'Durée de la vidéo (min)' },
   { value: 'days_since_upload', label: 'Jours depuis la mise en ligne' },
   { value: 'average_view_duration', label: 'Durée moy. de visionnage (sec)' },
   { value: 'average_view_percentage', label: 'Pourcentage moyen visionné' },

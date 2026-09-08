@@ -161,6 +161,11 @@ export default function VideoDetailPanel({ video, onClose }: Props) {
             <span>·</span>
             <a href={`https://youtube.com/watch?v=${video.youtube_id}`} target="_blank" rel="noreferrer"
               className="underline" style={{ color: 'var(--accent-red)' }}>YouTube</a>
+            <span>·</span>
+            {/* Fiche d'edition de la video dans YouTube Studio (necessite un compte
+                Google gestionnaire de la chaine ; sinon Studio affiche un acces refuse). */}
+            <a href={`https://studio.youtube.com/video/${video.youtube_id}/edit`} target="_blank" rel="noreferrer"
+              className="underline" style={{ color: 'var(--accent-red)' }} title="Ouvrir la fiche de la vidéo dans YouTube Studio">Studio</a>
           </div>
           {video.scheduled_publish_at && (
             <div

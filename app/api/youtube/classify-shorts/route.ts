@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth/options'
 import { createClient } from '@supabase/supabase-js'
+import { getGateUser } from '@/lib/gate/session'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -40,7 +41,12 @@ const supabase = createClient(
 
 // Verifie via l'URL /shorts/ si une video est un Short.
 // Renvoie true / false, ou null si indeterminable (erreur reseau, 404, 429...)
-async function checkIsShort(videoId: string): Promise<boolean | null> {
+// `samples` (optionnel) recoit une description des reponses indecises, pour le
+// diagnostic dans les logs (ex : YouTube renvoie 429 ou une page de consentement).
+async function checkIsShort(videoId: string, samples?: string[]): Promise<boolean | null> {
+  function note(msg: string) {
+    if (samples && samples.length < 5) samples.push(`${videoId}: ${msg}`)
+  }
   async function probe(method: 'HEAD' | 'GET') {
     const r = await fetch(`https://www.youtube.com/shorts/${videoId}`, {
       method,
@@ -51,39 +57,52 @@ async function checkIsShort(videoId: string): Promise<boolean | null> {
     if (r.status >= 300 && r.status < 400) {
       const loc = r.headers.get('location') || ''
       if (loc.includes('/watch')) return false             // redirige vers le player classique
-      return null                                          // redirection inattendue (consent, etc.)
+      note(`${method} ${r.status} -> ${loc.slice(0, 80)}`)  // redirection inattendue (consent, etc.)
+      return null
     }
-    return null                                            // 404 / 405 / 429 / autre
+    note(`${method} ${r.status}`)                           // 404 / 405 / 429 / autre
+    return null
   }
   try {
     const head = await probe('HEAD')
     if (head !== null) return head
     return await probe('GET')                              // HEAD parfois mal géré : 2e chance en GET
-  } catch {
+  } catch (e: any) {
+    note(`exception ${e?.message || e}`)
     return null
   }
 }
 
-async function isAuthorized(request: NextRequest): Promise<boolean> {
+// Renvoie le mode d'authentification reconnu, ou null si acces refuse :
+//  - 'cron'       : appel Vercel avec le secret CRON_SECRET
+//  - 'superadmin' : compte super-admin passe par le rideau (declenchement manuel
+//                   depuis le navigateur, utile pour lire le resultat en JSON)
+//  - 'google'     : session Google admin (historique)
+async function authMode(request: NextRequest): Promise<'cron' | 'superadmin' | 'google' | null> {
   const authHeader = request.headers.get('authorization')
   const cronSecret = process.env.CRON_SECRET
-  if (cronSecret && authHeader === `Bearer ${cronSecret}`) return true
+  if (cronSecret && authHeader === `Bearer ${cronSecret}`) return 'cron'
+  const gate = await getGateUser()
+  if (gate && gate.role === 'superadmin') return 'superadmin'
   const session = await getServerSession(authOptions)
-  return !!session?.userId
+  return session?.userId ? 'google' : null
 }
 
 export async function GET(request: NextRequest) {
-  if (!(await isAuthorized(request))) {
+  const startedAt = Date.now()
+  const mode = await authMode(request)
+  if (!mode) {
+    console.warn('[classify-shorts] acces refuse (ni secret cron, ni super-admin, ni session Google)')
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-
-  const startedAt = Date.now()
+  console.log(`[classify-shorts] demarrage (auth=${mode}, batch=${BATCH}, concurrency=${CONCURRENCY})`)
 
   try {
     // ETAPE 1 — Pre-classification SQL par la duree (couvre les videos
     // fraichement synchronisees sans consommer de verifs URL).
-    const { error: rpcError } = await supabase.rpc('preclassify_shorts')
-    if (rpcError) console.error('preclassify_shorts error:', rpcError.message)
+    const { data: preclassified, error: rpcError } = await supabase.rpc('preclassify_shorts')
+    if (rpcError) console.error('[classify-shorts] preclassify_shorts error:', rpcError.message)
+    else console.log(`[classify-shorts] preclassify_shorts: ${preclassified ?? 0} video(s) classee(s) par la duree`)
 
     // ETAPE 2 — Verification URL des candidates restantes.
     // Privees exclues (URL inaccessible) : elles seront classees une fois publiees.
@@ -98,11 +117,13 @@ export async function GET(request: NextRequest) {
     if (error) throw error
 
     let shorts = 0, classic = 0, undecided = 0
+    const undecidedSamples: string[] = []
     const ids = (candidates || []).map(c => c.youtube_id)
+    console.log(`[classify-shorts] ${ids.length} candidate(s) a verifier par URL`)
 
     for (let i = 0; i < ids.length; i += CONCURRENCY) {
       const chunk = ids.slice(i, i + CONCURRENCY)
-      const results = await Promise.all(chunk.map(async (id) => ({ id, isShort: await checkIsShort(id) })))
+      const results = await Promise.all(chunk.map(async (id) => ({ id, isShort: await checkIsShort(id, undecidedSamples) })))
 
       const shortIds = results.filter(r => r.isShort === true).map(r => r.id)
       const classicIds = results.filter(r => r.isShort === false).map(r => r.id)
@@ -128,16 +149,22 @@ export async function GET(request: NextRequest) {
       .is('is_short', null)
       .neq('status', 'private')
 
-    return NextResponse.json({
+    const summary = {
+      auth: mode,
+      preclassified: typeof preclassified === 'number' ? preclassified : (rpcError ? null : 0),
+      preclassifyError: rpcError ? rpcError.message : null,
       processed: ids.length,
       shorts,
       classic,
       undecided,
+      undecidedSamples,
       remaining: remaining || 0,
       durationMs: Date.now() - startedAt,
-    })
+    }
+    console.log('[classify-shorts] termine', JSON.stringify(summary))
+    return NextResponse.json(summary)
   } catch (e: any) {
-    console.error('classify-shorts error:', e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    console.error('[classify-shorts] erreur:', e?.message || e)
+    return NextResponse.json({ error: e.message, auth: mode, durationMs: Date.now() - startedAt }, { status: 500 })
   }
 }

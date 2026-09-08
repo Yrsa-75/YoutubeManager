@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getWorkspaceUserId } from '@/lib/gate/session'
+import { PG_FILTER_SHORT, PG_FILTER_VIDEO } from '@/lib/utils/videoFormat'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -93,11 +94,13 @@ export async function GET(req: NextRequest) {
       }
     }
     if (status) query = query.eq('status', status)
+    // Format : les videos non classees (is_short NULL) de 3 min ou moins sont des
+    // "Shorts probables" et sont rangees cote Shorts, pas cote Videos.
+    // Regle centralisee dans lib/utils/videoFormat.ts (partagee avec l'affichage).
     if (format === 'short') {
-      query = query.eq('is_short', true)
+      query = query.or(PG_FILTER_SHORT)
     } else if (format === 'video') {
-      // is_short FALSE ou pas encore classifie (NULL) => traite comme video classique
-      query = query.or('is_short.is.null,is_short.eq.false')
+      query = query.or(PG_FILTER_VIDEO)
     }
 
     // La colonne "Date de publication" (clé 'publication') est calculee :

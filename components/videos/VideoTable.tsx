@@ -4,6 +4,7 @@ import { ChevronUp, ChevronDown, Sparkles, ExternalLink, Settings2, Download, Fi
 import type { Video, ColorRule } from '@/types'
 import { formatNumber, formatDate, formatDuration, formatViewDuration, formatPercentage, formatMinutes } from '@/lib/utils/format'
 import { capShortsMetrics } from '@/lib/utils/shortsLoopCap'
+import { getEffectiveFormat, formatLabel } from '@/lib/utils/videoFormat'
 import { applyColorRules, applyAllColorRules } from '@/lib/utils/colorRules'
 import VideoDetailPanel from './VideoDetailPanel'
 import ColumnManager from './ColumnManager'
@@ -362,7 +363,7 @@ export default function VideoTable({ searchQuery: rawSearchQuery, searchField }:
           'ID Perso': v.custom_id || '',
           'Chaîne': v._channelTitle || '',
           'Titre': v.title,
-          'Format': v.is_short === true ? 'Short' : v.is_short === false ? 'Vidéo' : 'À classifier',
+          'Format': formatLabel(getEffectiveFormat(v)),
           'Visibilité': STATUS_LABELS[v.status]?.label || v.status,
           'Mise en ligne': (v.uploaded_at || v.published_at) ? new Date(v.uploaded_at || v.published_at).toLocaleDateString('fr-FR') : '',
           'Date de publication': v.scheduled_publish_at
@@ -548,11 +549,23 @@ export default function VideoTable({ searchQuery: rawSearchQuery, searchField }:
         // resynchronisation n'a pas rempli uploaded_at pour les anciennes lignes.
         return <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{formatDate(video.uploaded_at || video.published_at)}</span>
       case 'format': {
-        if (video.is_short === true) {
+        const fmt = getEffectiveFormat(video)
+        if (fmt === 'short') {
           return <span className="text-[11px] font-semibold px-2 py-0.5 rounded" style={{ background: 'rgba(230,57,70,0.15)', color: 'var(--accent-red)' }}>Short</span>
         }
-        if (video.is_short === false) {
+        if (fmt === 'video') {
           return <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: 'var(--bg-hover)', color: 'var(--text-secondary)' }}>Vidéo</span>
+        }
+        if (fmt === 'probable_short') {
+          // Non classee mais 3 min ou moins : rangee cote Shorts en attendant la
+          // confirmation automatique. Badge en pointille pour signaler l'incertitude.
+          return (
+            <span
+              className="text-[11px] font-semibold px-2 py-0.5 rounded cursor-help"
+              style={{ background: 'rgba(230,57,70,0.07)', color: 'var(--accent-red)', border: '1px dashed rgba(230,57,70,0.45)' }}
+              title="Short probable (3 min ou moins). Confirmation automatique en cours."
+            >Short ?</span>
+          )
         }
         return <span className="text-[11px] cursor-help" style={{ color: 'var(--text-muted)' }} title="Classification en cours — vérifiée automatiquement (vidéos privées : à leur publication)">…</span>
       }

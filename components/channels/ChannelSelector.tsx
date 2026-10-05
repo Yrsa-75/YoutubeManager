@@ -8,8 +8,18 @@ interface Channel {
   title: string
   thumbnail_url: string
   video_count: number
+  // Compteurs calcules par la plateforme (toutes visibilites), fournis par l'API
+  video_counts?: { total: number; public: number; private: number; unlisted: number }
   is_selected: boolean
   access_role?: 'owner' | 'operator' | 'viewer'
+}
+
+const fmt = new Intl.NumberFormat('fr-FR')
+function formatCount(n: number) { return fmt.format(n) }
+function countsTitle(c: { total: number; public: number; private: number; unlisted: number }) {
+  const parts = [`${formatCount(c.public)} publiques`, `${formatCount(c.private)} privées`]
+  if (c.unlisted > 0) parts.push(`${formatCount(c.unlisted)} non répertoriées`)
+  return `${formatCount(c.total)} vidéos dans SPICA Manager : ${parts.join(' · ')}`
 }
 
 export default function ChannelSelector() {
@@ -87,7 +97,16 @@ export default function ChannelSelector() {
           ) : (
             <div className="w-5 h-5 rounded-full flex-shrink-0" style={{ background: 'var(--bg-hover)' }} />
           )}
-          <span className="truncate flex-1 text-left" style={{ color: 'var(--text-primary)' }}>{ch.title}</span>
+          <span className="truncate flex-1 text-left" style={{ color: 'var(--text-primary)' }}>
+            {ch.title}
+            {ch.video_counts && (
+              <span
+                className="ml-1 tabular-nums"
+                style={{ color: 'var(--text-muted)' }}
+                title={countsTitle(ch.video_counts)}
+              >({formatCount(ch.video_counts.total)})</span>
+            )}
+          </span>
               {ch.access_role === 'operator' && (
                 <span title="Vous êtes opérateur sur cette chaîne" className="inline-flex items-center" style={{ color: '#3b82f6' }}>
                   <UserCheck size={11} />

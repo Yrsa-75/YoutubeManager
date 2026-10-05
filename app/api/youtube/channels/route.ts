@@ -55,11 +55,28 @@ export async function GET() {
   }
   const uniqueChannels = Array.from(dedupedMap.values())
 
+  // Compteurs de videos calcules en direct depuis la table videos (le champ
+  // video_count de channels est le chiffre YouTube fige a la connexion).
+  const countsMap = new Map<string, { total: number; public: number; private: number; unlisted: number }>()
+  const { data: counts, error: countsError } = await supabase.rpc('channel_video_counts', {
+    p_channel_ids: uniqueChannels.map(c => c.channel_id),
+  })
+  if (countsError) console.error('[channels] channel_video_counts:', countsError.message)
+  for (const row of (counts || []) as any[]) {
+    countsMap.set(row.channel_id, {
+      total: Number(row.total) || 0,
+      public: Number(row.public_count) || 0,
+      private: Number(row.private_count) || 0,
+      unlisted: Number(row.unlisted_count) || 0,
+    })
+  }
+
   // Enrich with access metadata + analytics_available flag
   const enriched = uniqueChannels.map(ch => {
     const acc = accesses.find(a => a.channel_id === ch.channel_id)
     return {
       ...ch,
+      video_counts: countsMap.get(ch.channel_id) || { total: 0, public: 0, private: 0, unlisted: 0 },
       is_selected: acc?.is_selected ?? ch.is_selected,
       access_role: acc?.role || 'owner',
       granted_by: acc?.granted_by || null,

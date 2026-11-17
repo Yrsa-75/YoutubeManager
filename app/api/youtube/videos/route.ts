@@ -22,6 +22,9 @@ export async function GET(req: NextRequest) {
     // Format : '' (tous) | video | short
     const format = searchParams.get('format') || ''
     const status = searchParams.get('status') || ''
+    // Plage de dates (sur la colonne calculée publication_date) : format YYYY-MM-DD, bornes incluses.
+    const dateFrom = searchParams.get('dateFrom') || ''
+    const dateTo = searchParams.get('dateTo') || ''
     const channelIds = searchParams.get('channelIds') || ''
     const sortBy = searchParams.get('sortBy') || 'published_at'
     const sortDir = searchParams.get('sortDir') || 'desc'
@@ -102,6 +105,11 @@ export async function GET(req: NextRequest) {
     } else if (format === 'video') {
       query = query.or(PG_FILTER_VIDEO)
     }
+
+    // Filtre plage de dates sur publication_date (= COALESCE(scheduled_publish_at, published_at)).
+    // dateTo est étendue à la fin de journée pour inclure toute la date choisie.
+    if (dateFrom) query = query.gte('publication_date', dateFrom)
+    if (dateTo) query = query.lte('publication_date', dateTo + 'T23:59:59.999')
 
     // La colonne "Date de publication" (clé 'publication') est calculee :
     // date programmee si presente, sinon date reelle. On trie sur la colonne

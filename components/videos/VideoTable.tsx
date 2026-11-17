@@ -129,6 +129,8 @@ export default function VideoTable({ searchQuery: rawSearchQuery, searchField }:
   const [statusFilter, setStatusFilter] = useState('')
   const [formatFilter, setFormatFilter] = useState('') // '' | 'video' | 'short'
   const [colorFilter, setColorFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('') // plage de dates (publication) : YYYY-MM-DD
+  const [dateTo, setDateTo] = useState('')
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null)
   const [colorRules, setColorRules] = useState<ColorRule[]>([])
   const [columns, setColumns] = useState(DEFAULT_COLUMNS)
@@ -159,7 +161,7 @@ export default function VideoTable({ searchQuery: rawSearchQuery, searchField }:
   const [refreshNonce, setRefreshNonce] = useState(0)
   const filterMode = !!colorFilter || advancedFilters.length > 0
   // Signature des filtres serveur : si elle change, le cache "toutes les vidéos" est invalidé.
-  const serverFilterKey = [searchQuery, searchField, sortBy, sortDir, statusFilter, formatFilter].join('|')
+  const serverFilterKey = [searchQuery, searchField, sortBy, sortDir, statusFilter, formatFilter, dateFrom, dateTo].join('|')
 
   // Load persisted column config on mount
   useEffect(() => {
@@ -200,7 +202,7 @@ export default function VideoTable({ searchQuery: rawSearchQuery, searchField }:
     if (!didMountRef.current) { didMountRef.current = true; return }
     if (page !== 1) setPage(1)
     else fetchVideos()
-  }, [searchQuery, searchField, sortBy, sortDir, statusFilter, formatFilter, pageSize])
+  }, [searchQuery, searchField, sortBy, sortDir, statusFilter, formatFilter, pageSize, dateFrom, dateTo])
 
   // Entrée/sortie du mode filtre global → revenir page 1 (évite une page hors limites)
   useEffect(() => { setPage(1) }, [filterMode])
@@ -309,12 +311,31 @@ export default function VideoTable({ searchQuery: rawSearchQuery, searchField }:
     const reqId = ++fetchSeqRef.current
     setLoading(true)
     try {
-      const params = new URLSearchParams({ search: searchQuery, searchField, sortBy, sortDir, status: statusFilter, format: formatFilter, page: String(page), limit: String(pageSize) })
-      const res = await fetch('/api/youtube/videos?' + params)
-      const data = await res.json()
-      if (reqId !== fetchSeqRef.current) return // réponse obsolète, on l'ignore
-      setVideos(data.videos || [])
-      setTotal(data.total || 0)
+      // Supabase plafonne CHAQUE requête à 1000 lignes. Pour une taille de page > 1000
+      // (ex. 2000), on assemble la page demandée en plusieurs requêtes de 1000, alignées
+      // sur les paquets serveur, puis on découpe la fenêtre exacte [start, start+pageSize].
+      const CHUNK = 1000
+      const start = (page - 1) * pageSize              // offset global de la 1re ligne voulue
+      const firstChunk = Math.floor(start / CHUNK)
+      const dropFront = start - firstChunk * CHUNK      // lignes à ignorer dans le 1er paquet
+      const needRaw = dropFront + pageSize              // lignes brutes à collecter
+      const collected: Video[] = []
+      let total = 0
+      let apiPage = firstChunk + 1
+      while (collected.length < needRaw) {
+        const params = new URLSearchParams({ search: searchQuery, searchField, sortBy, sortDir, status: statusFilter, format: formatFilter, dateFrom, dateTo, page: String(apiPage), limit: String(CHUNK) })
+        const res = await fetch('/api/youtube/videos?' + params)
+        const data = await res.json()
+        if (reqId !== fetchSeqRef.current) return // réponse obsolète, on l'ignore
+        const batch: Video[] = data.videos || []
+        total = data.total || 0
+        collected.push(...batch)
+        if (batch.length < CHUNK) break // fin du catalogue
+        apiPage++
+      }
+      if (reqId !== fetchSeqRef.current) return
+      setVideos(collected.slice(dropFront, dropFront + pageSize))
+      setTotal(total)
     } catch (e) {
       console.error(e)
     } finally {
@@ -335,15 +356,20 @@ export default function VideoTable({ searchQuery: rawSearchQuery, searchField }:
   // Récupère TOUTES les vidéos du filtre serveur courant (toutes les pages) pour l'export global.
   async function fetchAllVideos(): Promise<Video[]> {
     const all: Video[] = []
-    const EXPORT_LIMIT = 2000
+    // Supabase (PostgREST) plafonne CHAQUE requête à 1000 lignes max, quel que soit le
+    // "limit" demandé. On pagine donc par paquets de 1000 et on continue tant qu'on n'a
+    // pas tout récupéré (all.length < total). Avec un paquet > 1000, le serveur renvoyait
+    // 1000, la boucle croyait être au bout, et le total s'arrêtait à 1000.
+    const PAGE = 1000
     let p = 1
     while (p <= 100) {
-      const params = new URLSearchParams({ search: searchQuery, searchField, sortBy, sortDir, status: statusFilter, format: formatFilter, page: String(p), limit: String(EXPORT_LIMIT) })
+      const params = new URLSearchParams({ search: searchQuery, searchField, sortBy, sortDir, status: statusFilter, format: formatFilter, dateFrom, dateTo, page: String(p), limit: String(PAGE) })
       const res = await fetch('/api/youtube/videos?' + params)
       const data = await res.json()
       const batch: Video[] = data.videos || []
       all.push(...batch)
-      if (batch.length < EXPORT_LIMIT || all.length >= (data.total || 0)) break
+      const total = data.total || 0
+      if (batch.length < PAGE || all.length >= total) break
       p++
     }
     return all
@@ -685,6 +711,36 @@ export default function VideoTable({ searchQuery: rawSearchQuery, searchField }:
         ))}
 
         <div className="ml-auto flex items-center gap-2">
+          {/* Plage de dates (date de publication) — filtre côté serveur */}
+          <div className="flex items-center gap-1.5" title="Filtrer par date de publication">
+            <input
+              type="date"
+              value={dateFrom}
+              max={dateTo || undefined}
+              onChange={e => setDateFrom(e.target.value)}
+              aria-label="Date de publication — début"
+              className="h-7 px-2 rounded-md text-xs border outline-none"
+              style={{ background: 'var(--bg-card)', borderColor: (dateFrom || dateTo) ? 'rgba(230,57,70,0.3)' : 'var(--bg-border)', color: 'var(--text-secondary)', colorScheme: 'dark' }}
+            />
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>→</span>
+            <input
+              type="date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={e => setDateTo(e.target.value)}
+              aria-label="Date de publication — fin"
+              className="h-7 px-2 rounded-md text-xs border outline-none"
+              style={{ background: 'var(--bg-card)', borderColor: (dateFrom || dateTo) ? 'rgba(230,57,70,0.3)' : 'var(--bg-border)', color: 'var(--text-secondary)', colorScheme: 'dark' }}
+            />
+            {(dateFrom || dateTo) && (
+              <button
+                onClick={() => { setDateFrom(''); setDateTo('') }}
+                title="Effacer les dates"
+                className="h-7 w-7 rounded-md text-xs border flex items-center justify-center transition-all"
+                style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: 'var(--text-muted)' }}
+              >✕</button>
+            )}
+          </div>
           <button onClick={handleExport} disabled={exporting || total === 0}
             className="h-7 px-3 rounded-md text-xs font-medium border flex items-center gap-1.5 transition-all"
             style={{ background: 'var(--bg-card)', borderColor: 'var(--bg-border)', color: exporting ? 'var(--text-muted)' : '#22c55e', opacity: total === 0 ? 0.4 : 1 }}>
